@@ -9,64 +9,135 @@
 // except according to those terms.
 
 
-use check::{coercion, FnCtxt};
-use middle::ty::{self, Ty};
-use middle::infer::{self, TypeOrigin};
+use check::FnCtxt;
+use rustc::ty::Ty;
+use rustc::infer::{InferOk};
+use rustc::traits::ObligationCause;
 
-use std::result::Result::{Err, Ok};
-use syntax::codemap::Span;
-use rustc_front::hir;
+use syntax::ast;
+use syntax_pos::{self, Span};
+use rustc::hir;
+use rustc::hir::def::Def;
+use rustc::ty::{self, AssociatedItem};
+use errors::DiagnosticBuilder;
 
-// Requires that the two types unify, and prints an error message if
-// they don't.
-pub fn suptype<'a, 'tcx>(fcx: &FnCtxt<'a, 'tcx>, sp: Span,
-                         ty_expected: Ty<'tcx>, ty_actual: Ty<'tcx>) {
-    suptype_with_fn(fcx, sp, false, ty_expected, ty_actual,
-        |sp, e, a, s| { fcx.report_mismatched_types(sp, e, a, s) })
-}
+use super::method::probe;
 
-/// As `suptype`, but call `handle_err` if unification for subtyping fails.
-pub fn suptype_with_fn<'a, 'tcx, F>(fcx: &FnCtxt<'a, 'tcx>,
-                                    sp: Span,
-                                    b_is_expected: bool,
-                                    ty_a: Ty<'tcx>,
-                                    ty_b: Ty<'tcx>,
-                                    handle_err: F) where
-    F: FnOnce(Span, Ty<'tcx>, Ty<'tcx>, &ty::error::TypeError<'tcx>),
-{
-    // n.b.: order of actual, expected is reversed
-    match infer::mk_subty(fcx.infcx(), b_is_expected, TypeOrigin::Misc(sp),
-                          ty_b, ty_a) {
-      Ok(()) => { /* ok */ }
-      Err(ref err) => {
-          handle_err(sp, ty_a, ty_b, err);
-      }
+impl<'a, 'gcx, 'tcx> FnCtxt<'a, 'gcx, 'tcx> {
+    // Requires that the two types unify, and prints an error message if
+    // they don't.
+    pub fn demand_suptype(&self, sp: Span, expected: Ty<'tcx>, actual: Ty<'tcx>) {
+        let cause = self.misc(sp);
+        match self.sub_types(false, &cause, actual, expected) {
+            Ok(InferOk { obligations, value: () }) => {
+                self.register_predicates(obligations);
+            },
+            Err(e) => {
+                self.report_mismatched_types(&cause, expected, actual, e).emit();
+            }
+        }
     }
-}
 
-pub fn eqtype<'a, 'tcx>(fcx: &FnCtxt<'a, 'tcx>, sp: Span,
-                        expected: Ty<'tcx>, actual: Ty<'tcx>) {
-    match infer::mk_eqty(fcx.infcx(), false, TypeOrigin::Misc(sp), actual, expected) {
-        Ok(()) => { /* ok */ }
-        Err(ref err) => { fcx.report_mismatched_types(sp, expected, actual, err); }
+    pub fn demand_eqtype(&self, sp: Span, expected: Ty<'tcx>, actual: Ty<'tcx>) {
+        if let Some(mut err) = self.demand_eqtype_diag(sp, expected, actual) {
+            err.emit();
+        }
     }
-}
 
-// Checks that the type of `expr` can be coerced to `expected`.
-pub fn coerce<'a, 'tcx>(fcx: &FnCtxt<'a, 'tcx>,
-                        sp: Span,
-                        expected: Ty<'tcx>,
-                        expr: &hir::Expr) {
-    let expr_ty = fcx.expr_ty(expr);
-    debug!("demand::coerce(expected = {:?}, expr_ty = {:?})",
-           expected,
-           expr_ty);
-    let expr_ty = fcx.resolve_type_vars_if_possible(expr_ty);
-    let expected = fcx.resolve_type_vars_if_possible(expected);
-    match coercion::mk_assignty(fcx, expr, expr_ty, expected) {
-      Ok(()) => { /* ok */ }
-      Err(ref err) => {
-        fcx.report_mismatched_types(sp, expected, expr_ty, err);
-      }
+    pub fn demand_eqtype_diag(&self,
+                             sp: Span,
+                             expected: Ty<'tcx>,
+                             actual: Ty<'tcx>) -> Option<DiagnosticBuilder<'tcx>> {
+        self.demand_eqtype_with_origin(&self.misc(sp), expected, actual)
+    }
+
+    pub fn demand_eqtype_with_origin(&self,
+                                     cause: &ObligationCause<'tcx>,
+                                     expected: Ty<'tcx>,
+                                     actual: Ty<'tcx>) -> Option<DiagnosticBuilder<'tcx>> {
+        match self.eq_types(false, cause, actual, expected) {
+            Ok(InferOk { obligations, value: () }) => {
+                self.register_predicates(obligations);
+                None
+            },
+            Err(e) => {
+                Some(self.report_mismatched_types(cause, expected, actual, e))
+            }
+        }
+    }
+
+    // Checks that the type of `expr` can be coerced to `expected`.
+    //
+    // NB: This code relies on `self.diverges` to be accurate.  In
+    // particular, assignments to `!` will be permitted if the
+    // diverges flag is currently "always".
+    pub fn demand_coerce(&self,
+                         expr: &hir::Expr,
+                         checked_ty: Ty<'tcx>,
+                         expected: Ty<'tcx>) {
+        let expected = self.resolve_type_vars_with_obligations(expected);
+
+        if let Err(e) = self.try_coerce(expr, checked_ty, self.diverges.get(), expected) {
+            let cause = self.misc(expr.span);
+            let expr_ty = self.resolve_type_vars_with_obligations(checked_ty);
+            let mode = probe::Mode::MethodCall;
+            let suggestions = self.probe_for_return_type(syntax_pos::DUMMY_SP,
+                                                         mode,
+                                                         expected,
+                                                         checked_ty,
+                                                         ast::DUMMY_NODE_ID);
+            let mut err = self.report_mismatched_types(&cause, expected, expr_ty, e);
+            if suggestions.len() > 0 {
+                err.help(&format!("here are some functions which \
+                                   might fulfill your needs:\n{}",
+                                  self.get_best_match(&suggestions).join("\n")));
+            };
+            err.emit();
+        }
+    }
+
+    fn format_method_suggestion(&self, method: &AssociatedItem) -> String {
+        format!("- .{}({})",
+                method.name,
+                if self.has_no_input_arg(method) {
+                    ""
+                } else {
+                    "..."
+                })
+    }
+
+    fn display_suggested_methods(&self, methods: &[AssociatedItem]) -> Vec<String> {
+        methods.iter()
+               .take(5)
+               .map(|method| self.format_method_suggestion(&*method))
+               .collect::<Vec<String>>()
+    }
+
+    fn get_best_match(&self, methods: &[AssociatedItem]) -> Vec<String> {
+        let no_argument_methods: Vec<_> =
+            methods.iter()
+                   .filter(|ref x| self.has_no_input_arg(&*x))
+                   .map(|x| x.clone())
+                   .collect();
+        if no_argument_methods.len() > 0 {
+            self.display_suggested_methods(&no_argument_methods)
+        } else {
+            self.display_suggested_methods(&methods)
+        }
+    }
+
+    // This function checks if the method isn't static and takes other arguments than `self`.
+    fn has_no_input_arg(&self, method: &AssociatedItem) -> bool {
+        match method.def() {
+            Def::Method(def_id) => {
+                match self.tcx.item_type(def_id).sty {
+                    ty::TypeVariants::TyFnDef(_, _, sig) => {
+                        sig.inputs().skip_binder().len() == 1
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
     }
 }

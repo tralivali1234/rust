@@ -8,19 +8,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-struct Self;
-//~^ ERROR expected identifier, found keyword `Self`
+// compile-flags: -Z continue-parse-after-error
+
+mod foo {
+  struct Self;
+  //~^ ERROR expected identifier, found keyword `Self`
+}
 
 struct Bar<'Self>;
-//~^ ERROR invalid lifetime name
+//~^ ERROR lifetimes cannot use keyword names
+
+struct Foo;
 
 pub fn main() {
-    let Self = 5;
-    //~^ ERROR expected identifier, found keyword `Self`
-
     match 15 {
-        Self => (),
-        //~^ ERROR expected identifier, found keyword `Self`
         ref Self => (),
         //~^ ERROR expected identifier, found keyword `Self`
         mut Self => (),
@@ -28,22 +29,23 @@ pub fn main() {
         ref mut Self => (),
         //~^ ERROR expected identifier, found keyword `Self`
         Self!() => (),
-        //~^ ERROR expected identifier, found keyword `Self`
-        Foo { x: Self } => (),
-        //~^ ERROR expected identifier, found keyword `Self`
+        //~^ ERROR cannot find macro `Self!` in this scope
         Foo { Self } => (),
         //~^ ERROR expected identifier, found keyword `Self`
     }
 }
 
-use self::Self as Foo;
-//~^ ERROR expected identifier, found keyword `Self`
+mod m1 {
+    extern crate core as Self;
+    //~^ ERROR expected identifier, found keyword `Self`
+}
 
-use std::option::Option as Self;
-//~^ ERROR expected identifier, found keyword `Self`
+mod m2 {
+    use std::option::Option as Self;
+    //~^ ERROR expected identifier, found keyword `Self`
+}
 
-extern crate Self;
-//~^ ERROR expected identifier, found keyword `Self`
-
-trait Self {}
-//~^ ERROR expected identifier, found keyword `Self`
+mod m3 {
+    trait Self {}
+    //~^ ERROR expected identifier, found keyword `Self`
+}

@@ -12,58 +12,188 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use fs::{OpenOptions, Metadata};
+use fs::{self, OpenOptions, Metadata};
 use io;
 use path::Path;
 use sys;
 use sys_common::{AsInnerMut, AsInner};
 
+/// Windows-specific extensions to `File`
+#[stable(feature = "file_offset", since = "1.15.0")]
+pub trait FileExt {
+    /// Seeks to a given position and reads a number of bytes.
+    ///
+    /// Returns the number of bytes read.
+    ///
+    /// The offset is relative to the start of the file and thus independent
+    /// from the current cursor. The current cursor **is** affected by this
+    /// function, it is set to the end of the read.
+    ///
+    /// Reading beyond the end of the file will always return with a length of
+    /// 0.
+    ///
+    /// Note that similar to `File::read`, it is not an error to return with a
+    /// short read. When returning from such a short read, the file pointer is
+    /// still updated.
+    #[stable(feature = "file_offset", since = "1.15.0")]
+    fn seek_read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize>;
+
+    /// Seeks to a given position and writes a number of bytes.
+    ///
+    /// Returns the number of bytes written.
+    ///
+    /// The offset is relative to the start of the file and thus independent
+    /// from the current cursor. The current cursor **is** affected by this
+    /// function, it is set to the end of the write.
+    ///
+    /// When writing beyond the end of the file, the file is appropiately
+    /// extended and the intermediate bytes are left uninitialized.
+    ///
+    /// Note that similar to `File::write`, it is not an error to return a
+    /// short write. When returning from such a short write, the file pointer
+    /// is still updated.
+    #[stable(feature = "file_offset", since = "1.15.0")]
+    fn seek_write(&self, buf: &[u8], offset: u64) -> io::Result<usize>;
+}
+
+#[stable(feature = "file_offset", since = "1.15.0")]
+impl FileExt for fs::File {
+    fn seek_read(&self, buf: &mut [u8], offset: u64) -> io::Result<usize> {
+        self.as_inner().read_at(buf, offset)
+    }
+
+    fn seek_write(&self, buf: &[u8], offset: u64) -> io::Result<usize> {
+        self.as_inner().write_at(buf, offset)
+    }
+}
+
 /// Windows-specific extensions to `OpenOptions`
-#[unstable(feature = "open_options_ext",
-           reason = "may require more thought/methods",
-           issue = "27720")]
+#[stable(feature = "open_options_ext", since = "1.10.0")]
 pub trait OpenOptionsExt {
     /// Overrides the `dwDesiredAccess` argument to the call to `CreateFile`
     /// with the specified value.
-    fn desired_access(&mut self, access: u32) -> &mut Self;
-
-    /// Overrides the `dwCreationDisposition` argument to the call to
-    /// `CreateFile` with the specified value.
     ///
-    /// This will override any values of the standard `create` flags, for
-    /// example.
-    fn creation_disposition(&mut self, val: u32) -> &mut Self;
-
-    /// Overrides the `dwFlagsAndAttributes` argument to the call to
-    /// `CreateFile` with the specified value.
+    /// This will override the `read`, `write`, and `append` flags on the
+    /// `OpenOptions` structure. This method provides fine-grained control over
+    /// the permissions to read, write and append data, attributes (like hidden
+    /// and system) and extended attributes.
     ///
-    /// This will override any values of the standard flags on the
-    /// `OpenOptions` structure.
-    fn flags_and_attributes(&mut self, val: u32) -> &mut Self;
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::fs::OpenOptions;
+    /// use std::os::windows::fs::OpenOptionsExt;
+    ///
+    /// // Open without read and write permission, for example if you only need
+    /// // to call `stat()` on the file
+    /// let file = OpenOptions::new().access_mode(0).open("foo.txt");
+    /// ```
+    #[stable(feature = "open_options_ext", since = "1.10.0")]
+    fn access_mode(&mut self, access: u32) -> &mut Self;
 
     /// Overrides the `dwShareMode` argument to the call to `CreateFile` with
     /// the specified value.
     ///
-    /// This will override any values of the standard flags on the
-    /// `OpenOptions` structure.
+    /// By default `share_mode` is set to
+    /// `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`. Specifying
+    /// less permissions denies others to read from, write to and/or delete the
+    /// file while it is open.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::fs::OpenOptions;
+    /// use std::os::windows::fs::OpenOptionsExt;
+    ///
+    /// // Do not allow others to read or modify this file while we have it open
+    /// // for writing
+    /// let file = OpenOptions::new().write(true)
+    ///                              .share_mode(0)
+    ///                              .open("foo.txt");
+    /// ```
+    #[stable(feature = "open_options_ext", since = "1.10.0")]
     fn share_mode(&mut self, val: u32) -> &mut Self;
+
+    /// Sets extra flags for the `dwFileFlags` argument to the call to
+    /// `CreateFile2` (or combines it with `attributes` and `security_qos_flags`
+    /// to set the `dwFlagsAndAttributes` for `CreateFile`).
+    ///
+    /// Custom flags can only set flags, not remove flags set by Rusts options.
+    /// This options overwrites any previously set custom flags.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// extern crate winapi;
+    /// use std::fs::OpenOptions;
+    /// use std::os::windows::fs::OpenOptionsExt;
+    ///
+    /// let mut options = OpenOptions::new();
+    /// options.create(true).write(true);
+    /// if cfg!(windows) {
+    ///     options.custom_flags(winapi::FILE_FLAG_DELETE_ON_CLOSE);
+    /// }
+    /// let file = options.open("foo.txt");
+    /// ```
+    #[stable(feature = "open_options_ext", since = "1.10.0")]
+    fn custom_flags(&mut self, flags: u32) -> &mut Self;
+
+    /// Sets the `dwFileAttributes` argument to the call to `CreateFile2` to
+    /// the specified value (or combines it with `custom_flags` and
+    /// `security_qos_flags` to set the `dwFlagsAndAttributes` for
+    /// `CreateFile`).
+    ///
+    /// If a _new_ file is created because it does not yet exist and
+    ///`.create(true)` or `.create_new(true)` are specified, the new file is
+    /// given the attributes declared with `.attributes()`.
+    ///
+    /// If an _existing_ file is opened with `.create(true).truncate(true)`, its
+    /// existing attributes are preserved and combined with the ones declared
+    /// with `.attributes()`.
+    ///
+    /// In all other cases the attributes get ignored.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// extern crate winapi;
+    /// use std::fs::OpenOptions;
+    /// use std::os::windows::fs::OpenOptionsExt;
+    ///
+    /// let file = OpenOptions::new().write(true).create(true)
+    ///                              .attributes(winapi::FILE_ATTRIBUTE_HIDDEN)
+    ///                              .open("foo.txt");
+    /// ```
+    #[stable(feature = "open_options_ext", since = "1.10.0")]
+    fn attributes(&mut self, val: u32) -> &mut Self;
+
+    /// Sets the `dwSecurityQosFlags` argument to the call to `CreateFile2` to
+    /// the specified value (or combines it with `custom_flags` and `attributes`
+    /// to set the `dwFlagsAndAttributes` for `CreateFile`).
+    #[stable(feature = "open_options_ext", since = "1.10.0")]
+    fn security_qos_flags(&mut self, flags: u32) -> &mut OpenOptions;
 }
 
-#[unstable(feature = "open_options_ext",
-           reason = "may require more thought/methods",
-           issue = "27720")]
+#[stable(feature = "open_options_ext", since = "1.10.0")]
 impl OpenOptionsExt for OpenOptions {
-    fn desired_access(&mut self, access: u32) -> &mut OpenOptions {
-        self.as_inner_mut().desired_access(access); self
+    fn access_mode(&mut self, access: u32) -> &mut OpenOptions {
+        self.as_inner_mut().access_mode(access); self
     }
-    fn creation_disposition(&mut self, access: u32) -> &mut OpenOptions {
-        self.as_inner_mut().creation_disposition(access); self
+
+    fn share_mode(&mut self, share: u32) -> &mut OpenOptions {
+        self.as_inner_mut().share_mode(share); self
     }
-    fn flags_and_attributes(&mut self, access: u32) -> &mut OpenOptions {
-        self.as_inner_mut().flags_and_attributes(access); self
+
+    fn custom_flags(&mut self, flags: u32) -> &mut OpenOptions {
+        self.as_inner_mut().custom_flags(flags); self
     }
-    fn share_mode(&mut self, access: u32) -> &mut OpenOptions {
-        self.as_inner_mut().share_mode(access); self
+
+    fn attributes(&mut self, attributes: u32) -> &mut OpenOptions {
+        self.as_inner_mut().attributes(attributes); self
+    }
+
+    fn security_qos_flags(&mut self, flags: u32) -> &mut OpenOptions {
+        self.as_inner_mut().security_qos_flags(flags); self
     }
 }
 
@@ -110,9 +240,9 @@ pub trait MetadataExt {
 #[stable(feature = "metadata_ext", since = "1.1.0")]
 impl MetadataExt for Metadata {
     fn file_attributes(&self) -> u32 { self.as_inner().attrs() }
-    fn creation_time(&self) -> u64 { self.as_inner().created() }
-    fn last_access_time(&self) -> u64 { self.as_inner().accessed() }
-    fn last_write_time(&self) -> u64 { self.as_inner().modified() }
+    fn creation_time(&self) -> u64 { self.as_inner().created_u64() }
+    fn last_access_time(&self) -> u64 { self.as_inner().accessed_u64() }
+    fn last_write_time(&self) -> u64 { self.as_inner().modified_u64() }
     fn file_size(&self) -> u64 { self.as_inner().size() }
 }
 
@@ -127,7 +257,7 @@ impl MetadataExt for Metadata {
 /// use std::os::windows::fs;
 ///
 /// # fn foo() -> std::io::Result<()> {
-/// try!(fs::symlink_file("a.txt", "b.txt"));
+/// fs::symlink_file("a.txt", "b.txt")?;
 /// # Ok(())
 /// # }
 /// ```
@@ -148,7 +278,7 @@ pub fn symlink_file<P: AsRef<Path>, Q: AsRef<Path>>(src: P, dst: Q)
 /// use std::os::windows::fs;
 ///
 /// # fn foo() -> std::io::Result<()> {
-/// try!(fs::symlink_file("a", "b"));
+/// fs::symlink_file("a", "b")?;
 /// # Ok(())
 /// # }
 /// ```

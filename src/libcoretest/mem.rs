@@ -7,8 +7,8 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
+
 use core::mem::*;
-use test::Bencher;
 
 #[test]
 fn size_of_basic() {
@@ -16,6 +16,13 @@ fn size_of_basic() {
     assert_eq!(size_of::<u16>(), 2);
     assert_eq!(size_of::<u32>(), 4);
     assert_eq!(size_of::<u64>(), 8);
+}
+
+#[test]
+#[cfg(target_pointer_width = "16")]
+fn size_of_16() {
+    assert_eq!(size_of::<usize>(), 2);
+    assert_eq!(size_of::<*const usize>(), 2);
 }
 
 #[test]
@@ -45,6 +52,13 @@ fn align_of_basic() {
     assert_eq!(align_of::<u8>(), 1);
     assert_eq!(align_of::<u16>(), 2);
     assert_eq!(align_of::<u32>(), 4);
+}
+
+#[test]
+#[cfg(target_pointer_width = "16")]
+fn align_of_16() {
+    assert_eq!(align_of::<usize>(), 2);
+    assert_eq!(align_of::<*const usize>(), 2);
 }
 
 #[test]
@@ -107,61 +121,3 @@ fn test_transmute() {
     }
 }
 
-// FIXME #13642 (these benchmarks should be in another place)
-/// Completely miscellaneous language-construct benchmarks.
-// Static/dynamic method dispatch
-
-struct Struct {
-    field: isize
-}
-
-trait Trait {
-    fn method(&self) -> isize;
-}
-
-impl Trait for Struct {
-    fn method(&self) -> isize {
-        self.field
-    }
-}
-
-#[bench]
-fn trait_vtable_method_call(b: &mut Bencher) {
-    let s = Struct { field: 10 };
-    let t = &s as &Trait;
-    b.iter(|| {
-        t.method()
-    });
-}
-
-#[bench]
-fn trait_static_method_call(b: &mut Bencher) {
-    let s = Struct { field: 10 };
-    b.iter(|| {
-        s.method()
-    });
-}
-
-// Overhead of various match forms
-
-#[bench]
-fn match_option_some(b: &mut Bencher) {
-    let x = Some(10);
-    b.iter(|| {
-        match x {
-            Some(y) => y,
-            None => 11
-        }
-    });
-}
-
-#[bench]
-fn match_vec_pattern(b: &mut Bencher) {
-    let x = [1,2,3,4,5,6];
-    b.iter(|| {
-        match x {
-            [1,2,3,..] => 10,
-            _ => 11,
-        }
-    });
-}

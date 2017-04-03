@@ -8,52 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use middle::def_id::{DefId, DefIndex};
-use rbml;
+use schema::*;
+
+use rustc::hir::def_id::{DefId, DefIndex, DefIndexAddressSpace};
 use std::io::{Cursor, Write};
 use std::slice;
 use std::u32;
-
-/// As part of the metadata, we generate an index that stores, for
-/// each DefIndex, the position of the corresponding RBML document (if
-/// any).  This is just a big `[u32]` slice, where an entry of
-/// `u32::MAX` indicates that there is no RBML document. This little
-/// struct just stores the offsets within the metadata of the start
-/// and end of this slice. These are actually part of an RBML
-/// document, but for looking things up in the metadata, we just
-/// discard the RBML positioning and jump directly to the data.
-pub struct Index {
-    data_start: usize,
-    data_end: usize,
-}
-
-impl Index {
-    /// Given the RBML doc representing the index, save the offests
-    /// for later.
-    pub fn from_rbml(index: rbml::Doc) -> Index {
-        Index { data_start: index.start, data_end: index.end }
-    }
-
-    /// Given the metadata, extract out the offset of a particular
-    /// DefIndex (if any).
-    #[inline(never)]
-    pub fn lookup_item(&self, bytes: &[u8], def_index: DefIndex) -> Option<u32> {
-        let words = bytes_to_words(&bytes[self.data_start..self.data_end]);
-        let index = def_index.as_usize();
-
-        debug!("lookup_item: index={:?} words.len={:?}",
-               index, words.len());
-
-        let position = u32::from_be(words[index]);
-        if position == u32::MAX {
-            debug!("lookup_item: position=u32::MAX");
-            None
-        } else {
-            debug!("lookup_item: position={:?}", position);
-            Some(position)
-        }
-    }
-}
 
 /// While we are generating the metadata, we also track the position
 /// of each DefIndex. It is not required that all definitions appear
@@ -62,84 +22,132 @@ impl Index {
 /// `u32::MAX`. Whenever an index is visited, we fill in the
 /// appropriate spot by calling `record_position`. We should never
 /// visit the same index twice.
-pub struct IndexData {
-    positions: Vec<u32>,
+pub struct Index {
+    positions: [Vec<u32>; 2]
 }
 
-impl IndexData {
-    pub fn new(max_index: usize) -> IndexData {
-        IndexData {
-            positions: vec![u32::MAX; max_index]
+impl Index {
+    pub fn new((max_index_lo, max_index_hi): (usize, usize)) -> Index {
+        Index {
+            positions: [vec![u32::MAX; max_index_lo],
+                        vec![u32::MAX; max_index_hi]],
         }
     }
 
-    pub fn record(&mut self, def_id: DefId, position: u64) {
+    pub fn record(&mut self, def_id: DefId, entry: Lazy<Entry>) {
         assert!(def_id.is_local());
-        self.record_index(def_id.index, position)
+        self.record_index(def_id.index, entry);
     }
 
-    pub fn record_index(&mut self, item: DefIndex, position: u64) {
-        let item = item.as_usize();
+    pub fn record_index(&mut self, item: DefIndex, entry: Lazy<Entry>) {
+        assert!(entry.position < (u32::MAX as usize));
+        let position = entry.position as u32;
+        let space_index = item.address_space().index();
+        let array_index = item.as_array_index();
 
-        assert!(position < (u32::MAX as u64));
-        let position = position as u32;
-
-        assert!(self.positions[item] == u32::MAX,
+        assert!(self.positions[space_index][array_index] == u32::MAX,
                 "recorded position for item {:?} twice, first at {:?} and now at {:?}",
-                item, self.positions[item], position);
+                item,
+                self.positions[space_index][array_index],
+                position);
 
-        self.positions[item] = position;
+        self.positions[space_index][array_index] = position.to_le();
     }
 
-    pub fn write_index(&self, buf: &mut Cursor<Vec<u8>>) {
-        for &position in &self.positions {
-            write_be_u32(buf, position);
+    pub fn write_index(&self, buf: &mut Cursor<Vec<u8>>) -> LazySeq<Index> {
+        let pos = buf.position();
+
+        // First we write the length of the lower range ...
+        buf.write_all(words_to_bytes(&[self.positions[0].len() as u32])).unwrap();
+        // ... then the values in the lower range ...
+        buf.write_all(words_to_bytes(&self.positions[0][..])).unwrap();
+        // ... then the values in the higher range.
+        buf.write_all(words_to_bytes(&self.positions[1][..])).unwrap();
+        LazySeq::with_position_and_length(pos as usize,
+            self.positions[0].len() + self.positions[1].len() + 1)
+    }
+}
+
+impl<'tcx> LazySeq<Index> {
+    /// Given the metadata, extract out the offset of a particular
+    /// DefIndex (if any).
+    #[inline(never)]
+    pub fn lookup(&self, bytes: &[u8], def_index: DefIndex) -> Option<Lazy<Entry<'tcx>>> {
+        let words = &bytes_to_words(&bytes[self.position..])[..self.len];
+        let index = def_index.as_usize();
+
+        debug!("Index::lookup: index={:?} words.len={:?}",
+               index,
+               words.len());
+
+        let positions = match def_index.address_space() {
+            DefIndexAddressSpace::Low => &words[1..],
+            DefIndexAddressSpace::High => {
+                // This is a DefIndex in the higher range, so find out where
+                // that starts:
+                let lo_count = u32::from_le(words[0].get()) as usize;
+                &words[lo_count + 1 .. ]
+            }
+        };
+
+        let array_index = def_index.as_array_index();
+        let position = u32::from_le(positions[array_index].get());
+        if position == u32::MAX {
+            debug!("Index::lookup: position=u32::MAX");
+            None
+        } else {
+            debug!("Index::lookup: position={:?}", position);
+            Some(Lazy::with_position(position as usize))
         }
     }
-}
 
-/// A dense index with integer keys. Different API from IndexData (should
-/// these be merged?)
-pub struct DenseIndex {
-    start: usize,
-    end: usize
-}
+    pub fn iter_enumerated<'a>(&self,
+                               bytes: &'a [u8])
+                               -> impl Iterator<Item = (DefIndex, Lazy<Entry<'tcx>>)> + 'a {
+        let words = &bytes_to_words(&bytes[self.position..])[..self.len];
+        let lo_count = u32::from_le(words[0].get()) as usize;
+        let lo = &words[1 .. lo_count + 1];
+        let hi = &words[1 + lo_count ..];
 
-impl DenseIndex {
-    pub fn lookup(&self, buf: &[u8], ix: u32) -> Option<u32> {
-        let data = bytes_to_words(&buf[self.start..self.end]);
-        data.get(ix as usize).map(|d| u32::from_be(*d))
+        lo.iter().map(|word| word.get()).enumerate().filter_map(|(index, pos)| {
+            if pos == u32::MAX {
+                None
+            } else {
+                let pos = u32::from_le(pos) as usize;
+                Some((DefIndex::new(index), Lazy::with_position(pos)))
+            }
+        }).chain(hi.iter().map(|word| word.get()).enumerate().filter_map(|(index, pos)| {
+            if pos == u32::MAX {
+                None
+            } else {
+                let pos = u32::from_le(pos) as usize;
+                Some((DefIndex::new(index + DefIndexAddressSpace::High.start()),
+                                    Lazy::with_position(pos)))
+            }
+        }))
     }
-    pub fn from_buf(buf: &[u8], start: usize, end: usize) -> Self {
-        assert!((end-start)%4 == 0 && start <= end && end <= buf.len());
-        DenseIndex {
-            start: start,
-            end: end
-        }
+}
+
+#[repr(packed)]
+#[derive(Copy)]
+struct Unaligned<T>(T);
+
+// The derived Clone impl is unsafe for this packed struct since it needs to pass a reference to
+// the field to `T::clone`, but this reference may not be properly aligned.
+impl<T: Copy> Clone for Unaligned<T> {
+    fn clone(&self) -> Self {
+        *self
     }
 }
 
-pub fn write_dense_index(entries: Vec<u32>, buf: &mut Cursor<Vec<u8>>) {
-    let elen = entries.len();
-    assert!(elen < u32::MAX as usize);
-
-    for entry in entries {
-        write_be_u32(buf, entry);
-    }
-
-    info!("write_dense_index: {} entries", elen);
+impl<T> Unaligned<T> {
+    fn get(self) -> T { self.0 }
 }
 
-fn write_be_u32<W: Write>(w: &mut W, u: u32) {
-    let _ = w.write_all(&[
-        (u >> 24) as u8,
-        (u >> 16) as u8,
-        (u >>  8) as u8,
-        (u >>  0) as u8,
-    ]);
+fn bytes_to_words(b: &[u8]) -> &[Unaligned<u32>] {
+    unsafe { slice::from_raw_parts(b.as_ptr() as *const Unaligned<u32>, b.len() / 4) }
 }
 
-fn bytes_to_words(b: &[u8]) -> &[u32] {
-    assert!(b.len() % 4 == 0);
-    unsafe { slice::from_raw_parts(b.as_ptr() as *const u32, b.len()/4) }
+fn words_to_bytes(w: &[u32]) -> &[u8] {
+    unsafe { slice::from_raw_parts(w.as_ptr() as *const u8, w.len() * 4) }
 }

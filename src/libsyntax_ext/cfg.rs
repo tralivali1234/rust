@@ -12,33 +12,26 @@
 /// a literal `true` or `false` based on whether the given cfg matches the
 /// current compilation environment.
 
-use syntax::ast;
-use syntax::codemap::Span;
 use syntax::ext::base::*;
 use syntax::ext::base;
 use syntax::ext::build::AstBuilder;
 use syntax::attr;
+use syntax::tokenstream;
 use syntax::parse::token;
-use syntax::config::CfgDiagReal;
+use syntax_pos::Span;
 
 pub fn expand_cfg<'cx>(cx: &mut ExtCtxt,
                        sp: Span,
-                       tts: &[ast::TokenTree])
-                       -> Box<base::MacResult+'static> {
+                       tts: &[tokenstream::TokenTree])
+                       -> Box<base::MacResult + 'static> {
     let mut p = cx.new_parser_from_tts(tts);
     let cfg = panictry!(p.parse_meta_item());
 
-    if !panictry!(p.eat(&token::Eof)){
+    if !p.eat(&token::Eof) {
         cx.span_err(sp, "expected 1 cfg-pattern");
         return DummyResult::expr(sp);
     }
 
-    let matches_cfg = {
-        let mut diag = CfgDiagReal {
-            diag: &cx.parse_sess.span_diagnostic,
-            feature_gated_cfgs: cx.feature_gated_cfgs,
-        };
-        attr::cfg_matches(&cx.cfg, &cfg, &mut diag)
-    };
+    let matches_cfg = attr::cfg_matches(&cfg, cx.parse_sess, cx.ecfg.features);
     MacEager::expr(cx.expr_bool(sp, matches_cfg))
 }

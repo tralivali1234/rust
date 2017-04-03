@@ -8,14 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! MacOS-specific definitions
+//! macOS-specific definitions
 
 #![stable(feature = "raw_ext", since = "1.1.0")]
 
 pub mod raw;
-
-#[stable(feature = "raw_ext", since = "1.1.0")]
-pub mod fs {
-    #[stable(feature = "raw_ext", since = "1.1.0")]
-    pub use sys::fs::MetadataExt;
-}
+pub mod fs;

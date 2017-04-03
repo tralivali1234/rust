@@ -24,6 +24,7 @@ fn main() {
     let x = foo();
     //~^ ERROR: mismatched types
     //~| NOTE: conflicting type parameter defaults `usize` and `isize`
+    //~| NOTE: conflicting type parameter defaults `usize` and `isize`
     //~| NOTE: ...that was applied to an unconstrained type variable here
 
     // Here, B is instantiated with $1=uint, and constraint $0 <: $1 is added.

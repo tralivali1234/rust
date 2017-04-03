@@ -9,21 +9,20 @@
 // except according to those terms.
 
 use std::collections::{HashMap, HashSet};
-use std::collections::hash_state::DefaultState;
 use std::default::Default;
-use std::hash::{Hasher, Hash};
+use std::hash::{Hasher, Hash, BuildHasherDefault};
 
-pub type FnvHashMap<K, V> = HashMap<K, V, DefaultState<FnvHasher>>;
-pub type FnvHashSet<V> = HashSet<V, DefaultState<FnvHasher>>;
+pub type FnvHashMap<K, V> = HashMap<K, V, BuildHasherDefault<FnvHasher>>;
+pub type FnvHashSet<V> = HashSet<V, BuildHasherDefault<FnvHasher>>;
 
 #[allow(non_snake_case)]
 pub fn FnvHashMap<K: Hash + Eq, V>() -> FnvHashMap<K, V> {
-    Default::default()
+    HashMap::default()
 }
 
 #[allow(non_snake_case)]
 pub fn FnvHashSet<V: Hash + Eq>() -> FnvHashSet<V> {
-    Default::default()
+    HashSet::default()
 }
 
 /// A speedy hash algorithm for node ids and def ids. The hashmap in
@@ -36,10 +35,15 @@ pub fn FnvHashSet<V: Hash + Eq>() -> FnvHashSet<V> {
 pub struct FnvHasher(u64);
 
 impl Default for FnvHasher {
-    fn default() -> FnvHasher { FnvHasher(0xcbf29ce484222325) }
+    /// Creates a `FnvHasher`, with a 64-bit hex initial value.
+    #[inline]
+    fn default() -> FnvHasher {
+        FnvHasher(0xcbf29ce484222325)
+    }
 }
 
 impl Hasher for FnvHasher {
+    #[inline]
     fn write(&mut self, bytes: &[u8]) {
         let FnvHasher(mut hash) = *self;
         for byte in bytes {
@@ -48,5 +52,15 @@ impl Hasher for FnvHasher {
         }
         *self = FnvHasher(hash);
     }
-    fn finish(&self) -> u64 { self.0 }
+
+    #[inline]
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+pub fn hash<T: Hash>(v: &T) -> u64 {
+    let mut state = FnvHasher::default();
+    v.hash(&mut state);
+    state.finish()
 }

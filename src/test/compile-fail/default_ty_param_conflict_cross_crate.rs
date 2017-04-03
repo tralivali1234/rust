@@ -24,6 +24,9 @@ fn main() {
     //~^ NOTE: ...that also applies to the same type variable here
 
     meh(foo);
-    //~^ ERROR: mismatched types:
+    //~^ ERROR: mismatched types
     //~| NOTE: conflicting type parameter defaults `bool` and `char`
+    //~| NOTE: conflicting type parameter defaults `bool` and `char`
+    //~| a second default is defined on `default_param_test::bleh`
+    //~| NOTE:  ...that was applied to an unconstrained type variable here
 }

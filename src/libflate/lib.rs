@@ -14,31 +14,24 @@
 //! [def]: https://en.wikipedia.org/wiki/DEFLATE
 //! [mz]: https://code.google.com/p/miniz/
 
-// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
-#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "flate"]
 #![unstable(feature = "rustc_private", issue = "27812")]
-#![cfg_attr(stage0, staged_api)]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![doc(html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "https://doc.rust-lang.org/favicon.ico",
        html_root_url = "https://doc.rust-lang.org/nightly/",
        test(attr(deny(warnings))))]
+#![deny(warnings)]
 
 #![feature(libc)]
 #![feature(staged_api)]
 #![feature(unique)]
-#![cfg_attr(test, feature(rustc_private, rand, vec_push_all))]
-#![cfg_attr(stage0, allow(improper_ctypes))]
-
-#[cfg(test)]
-#[macro_use]
-extern crate log;
+#![cfg_attr(test, feature(rand))]
 
 extern crate libc;
 
-use libc::{c_void, size_t, c_int};
+use libc::{c_int, c_void, size_t};
 use std::fmt;
 use std::ops::Deref;
 use std::ptr::Unique;
@@ -81,7 +74,6 @@ impl Drop for Bytes {
     }
 }
 
-#[link(name = "miniz", kind = "static")]
 extern "C" {
     /// Raw miniz compression function.
     fn tdefl_compress_mem_to_heap(psrc_buf: *const c_void,
@@ -98,11 +90,14 @@ extern "C" {
                                     -> *mut c_void;
 }
 
-const LZ_NORM: c_int = 0x80;  // LZ with 128 probes, "normal"
-const TINFL_FLAG_PARSE_ZLIB_HEADER: c_int = 0x1; // parse zlib header and adler32 checksum
-const TDEFL_WRITE_ZLIB_HEADER: c_int = 0x01000; // write zlib header and adler32 checksum
+const LZ_FAST: c_int = 0x01;  // LZ with 1 probe, "fast"
+const TDEFL_GREEDY_PARSING_FLAG: c_int = 0x04000; // fast greedy parsing instead of lazy parsing
 
-fn deflate_bytes_internal(bytes: &[u8], flags: c_int) -> Bytes {
+/// Compress a buffer without writing any sort of header on the output. Fast
+/// compression is used because it is almost twice as fast as default
+/// compression and the compression ratio is only marginally worse.
+pub fn deflate_bytes(bytes: &[u8]) -> Bytes {
+    let flags = LZ_FAST | TDEFL_GREEDY_PARSING_FLAG;
     unsafe {
         let mut outsz: size_t = 0;
         let res = tdefl_compress_mem_to_heap(bytes.as_ptr() as *const _,
@@ -117,17 +112,9 @@ fn deflate_bytes_internal(bytes: &[u8], flags: c_int) -> Bytes {
     }
 }
 
-/// Compress a buffer, without writing any sort of header on the output.
-pub fn deflate_bytes(bytes: &[u8]) -> Bytes {
-    deflate_bytes_internal(bytes, LZ_NORM)
-}
-
-/// Compress a buffer, using a header that zlib can understand.
-pub fn deflate_bytes_zlib(bytes: &[u8]) -> Bytes {
-    deflate_bytes_internal(bytes, LZ_NORM | TDEFL_WRITE_ZLIB_HEADER)
-}
-
-fn inflate_bytes_internal(bytes: &[u8], flags: c_int) -> Result<Bytes, Error> {
+/// Decompress a buffer without parsing any sort of header on the input.
+pub fn inflate_bytes(bytes: &[u8]) -> Result<Bytes, Error> {
+    let flags = 0;
     unsafe {
         let mut outsz: size_t = 0;
         let res = tinfl_decompress_mem_to_heap(bytes.as_ptr() as *const _,
@@ -145,21 +132,11 @@ fn inflate_bytes_internal(bytes: &[u8], flags: c_int) -> Result<Bytes, Error> {
     }
 }
 
-/// Decompress a buffer, without parsing any sort of header on the input.
-pub fn inflate_bytes(bytes: &[u8]) -> Result<Bytes, Error> {
-    inflate_bytes_internal(bytes, 0)
-}
-
-/// Decompress a buffer that starts with a zlib header.
-pub fn inflate_bytes_zlib(bytes: &[u8]) -> Result<Bytes, Error> {
-    inflate_bytes_internal(bytes, TINFL_FLAG_PARSE_ZLIB_HEADER)
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(deprecated)]
-    use super::{inflate_bytes, deflate_bytes};
-    use std::__rand::{thread_rng, Rng};
+    use super::{deflate_bytes, inflate_bytes};
+    use std::__rand::{Rng, thread_rng};
 
     #[test]
     fn test_flate_round_trip() {
@@ -173,16 +150,10 @@ mod tests {
         for _ in 0..20 {
             let mut input = vec![];
             for _ in 0..2000 {
-                input.push_all(r.choose(&words).unwrap());
+                input.extend_from_slice(r.choose(&words).unwrap());
             }
-            debug!("de/inflate of {} bytes of random word-sequences",
-                   input.len());
             let cmp = deflate_bytes(&input);
             let out = inflate_bytes(&cmp).unwrap();
-            debug!("{} bytes deflated to {} ({:.1}% size)",
-                   input.len(),
-                   cmp.len(),
-                   100.0 * ((cmp.len() as f64) / (input.len() as f64)));
             assert_eq!(&*input, &*out);
         }
     }

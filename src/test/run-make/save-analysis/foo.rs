@@ -11,7 +11,7 @@
 #![ crate_name = "test" ]
 #![feature(box_syntax)]
 #![feature(rustc_private)]
-
+#![feature(associated_type_defaults)]
 
 extern crate graphviz;
 // A simple rust project
@@ -56,6 +56,12 @@ fn test_alias<I: Iterator>(i: Option<<I as Iterator>::Item>) {
 
     let x = (3isize, 4usize);
     let y = x.1;
+}
+
+// Issue #37700
+const LUT_BITS: usize = 3;
+pub struct HuffmanTable {
+    ac_lut: Option<[(i16, u8); 1 << LUT_BITS]>,
 }
 
 struct TupStruct(isize, isize, Box<str>);
@@ -206,7 +212,7 @@ fn matchSomeEnum(val: SomeEnum) {
     match val {
         SomeEnum::Ints(int1, int2) => { println(&(int1+int2).to_string()); }
         SomeEnum::Floats(float1, float2) => { println(&(float2*float1).to_string()); }
-        SomeEnum::Strings(_, _, s3) => { println(s3); }
+        SomeEnum::Strings(.., s3) => { println(s3); }
         SomeEnum::MyTypes(mt1, mt2) => { println(&(mt1.field1 - mt2.field1).to_string()); }
     }
 }
@@ -225,7 +231,7 @@ fn matchSomeStructEnum2(se: SomeStructEnum) {
     match se {
         EnumStruct{a: ref aaa, ..} => println(&aaa.to_string()),
         EnumStruct2{f1, f2: f2} => println(&f1.field1.to_string()),
-        EnumStruct3{f1, f3: SomeEnum::Ints(_, _), f2} => println(&f1.field1.to_string()),
+        EnumStruct3{f1, f3: SomeEnum::Ints(..), f2} => println(&f1.field1.to_string()),
         _ => {},
     }
 }
@@ -285,6 +291,26 @@ fn hello<X: SomeTrait>((z, a) : (u32, String), ex: X) {
 
 pub struct blah {
     used_link_args: RefCell<[&'static str; 0]>,
+}
+
+#[macro_use]
+mod macro_use_test {
+    macro_rules! test_rec {
+        (q, $src: expr) => {{
+            print!("{}", $src);
+            test_rec!($src);
+        }};
+        ($src: expr) => {
+            print!("{}", $src);
+        };
+    }
+
+    macro_rules! internal_vars {
+        ($src: ident) => {{
+            let mut x = $src;
+            x += 100;
+        }};
+    }
 }
 
 fn main() { // foo
@@ -356,6 +382,11 @@ fn main() { // foo
     while let Some(z) = None {
         foo_foo(z);
     }
+
+    let mut x = 4;
+    test_rec!(q, "Hello");
+    assert_eq!(x, 4);
+    internal_vars!(x);
 }
 
 fn foo_foo(_: i32) {}
@@ -397,4 +428,33 @@ impl Error + 'static + Send {
     pub fn is<T: Error + 'static>(&self) -> bool {
         <Error + 'static>::is::<T>(self)
     }
+}
+extern crate serialize;
+#[derive(Clone, Copy, Hash, Encodable, Decodable, PartialEq, Eq, PartialOrd, Ord, Debug, Default)]
+struct AllDerives(i32);
+
+fn test_format_args() {
+    let x = 1;
+    let y = 2;
+    let name = "Joe Blogg";
+    println!("Hello {}", name);
+    print!("Hello {0}", name);
+    print!("{0} + {} = {}", x, y);
+    print!("x is {}, y is {1}, name is {n}", x, y, n = name);
+}
+
+struct FrameBuffer;
+
+struct SilenceGenerator;
+
+impl Iterator for SilenceGenerator {
+    type Item = FrameBuffer;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        panic!();
+    }
+}
+
+trait Foo {
+    type Bar = FrameBuffer;
 }

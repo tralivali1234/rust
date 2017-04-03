@@ -10,13 +10,12 @@
 
 // Test that we mutate a counter on the stack only when we expect to.
 
-
 fn call<F>(f: F) where F : FnOnce() {
     f();
 }
 
 fn main() {
-    let y = vec!(format!("Hello"), format!("World"));
+    let y = vec![format!("Hello"), format!("World")];
     let mut counter = 22_u32;
 
     call(|| {

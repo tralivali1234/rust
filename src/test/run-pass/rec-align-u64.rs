@@ -41,7 +41,9 @@ struct Outer {
           target_os = "freebsd",
           target_os = "dragonfly",
           target_os = "netbsd",
-          target_os = "openbsd"))]
+          target_os = "openbsd",
+          target_os = "solaris",
+          target_os = "emscripten"))]
 mod m {
     #[cfg(target_arch = "x86")]
     pub mod m {
@@ -49,7 +51,7 @@ mod m {
         pub fn size() -> usize { 12 }
     }
 
-    #[cfg(any(target_arch = "x86_64", target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(not(target_arch = "x86"))]
     pub mod m {
         pub fn align() -> usize { 8 }
         pub fn size() -> usize { 16 }

@@ -9,48 +9,45 @@
 // except according to those terms.
 
 use syntax::ast;
-use syntax::codemap;
 use syntax::ext::base;
 use syntax::ext::build::AstBuilder;
-use syntax::parse::token;
+use syntax::symbol::Symbol;
+use syntax_pos;
+use syntax::tokenstream;
 
 use std::string::String;
 
 pub fn expand_syntax_ext(cx: &mut base::ExtCtxt,
-                         sp: codemap::Span,
-                         tts: &[ast::TokenTree])
-                         -> Box<base::MacResult+'static> {
+                         sp: syntax_pos::Span,
+                         tts: &[tokenstream::TokenTree])
+                         -> Box<base::MacResult + 'static> {
     let es = match base::get_exprs_from_tts(cx, sp, tts) {
         Some(e) => e,
-        None => return base::DummyResult::expr(sp)
+        None => return base::DummyResult::expr(sp),
     };
     let mut accumulator = String::new();
     for e in es {
         match e.node {
-            ast::ExprLit(ref lit) => {
+            ast::ExprKind::Lit(ref lit) => {
                 match lit.node {
-                    ast::LitStr(ref s, _) |
-                    ast::LitFloat(ref s, _) |
-                    ast::LitFloatUnsuffixed(ref s) => {
-                        accumulator.push_str(&s);
+                    ast::LitKind::Str(ref s, _) |
+                    ast::LitKind::Float(ref s, _) |
+                    ast::LitKind::FloatUnsuffixed(ref s) => {
+                        accumulator.push_str(&s.as_str());
                     }
-                    ast::LitChar(c) => {
+                    ast::LitKind::Char(c) => {
                         accumulator.push(c);
                     }
-                    ast::LitInt(i, ast::UnsignedIntLit(_)) |
-                    ast::LitInt(i, ast::SignedIntLit(_, ast::Plus)) |
-                    ast::LitInt(i, ast::UnsuffixedIntLit(ast::Plus)) => {
+                    ast::LitKind::Int(i, ast::LitIntType::Unsigned(_)) |
+                    ast::LitKind::Int(i, ast::LitIntType::Signed(_)) |
+                    ast::LitKind::Int(i, ast::LitIntType::Unsuffixed) => {
                         accumulator.push_str(&format!("{}", i));
                     }
-                    ast::LitInt(i, ast::SignedIntLit(_, ast::Minus)) |
-                    ast::LitInt(i, ast::UnsuffixedIntLit(ast::Minus)) => {
-                        accumulator.push_str(&format!("-{}", i));
-                    }
-                    ast::LitBool(b) => {
+                    ast::LitKind::Bool(b) => {
                         accumulator.push_str(&format!("{}", b));
                     }
-                    ast::LitByte(..) |
-                    ast::LitByteStr(..) => {
+                    ast::LitKind::Byte(..) |
+                    ast::LitKind::ByteStr(..) => {
                         cx.span_err(e.span, "cannot concatenate a byte string literal");
                     }
                 }
@@ -60,7 +57,5 @@ pub fn expand_syntax_ext(cx: &mut base::ExtCtxt,
             }
         }
     }
-    base::MacEager::expr(cx.expr_str(
-            sp,
-            token::intern_and_get_ident(&accumulator[..])))
+    base::MacEager::expr(cx.expr_str(sp, Symbol::intern(&accumulator)))
 }

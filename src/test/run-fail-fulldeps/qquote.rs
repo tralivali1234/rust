@@ -10,36 +10,32 @@
 
 // ignore-cross-compile
 
-// error-pattern:expected identifier, found keyword `let`
+// error-pattern:expected expression, found statement (`let`)
 
 #![feature(quote, rustc_private)]
 
 extern crate syntax;
+extern crate syntax_pos;
 
 use syntax::ast;
-use syntax::codemap::{self, DUMMY_SP};
-use syntax::parse;
+use syntax::codemap;
 use syntax::print::pprust;
+use syntax::symbol::Symbol;
+use syntax_pos::DUMMY_SP;
 
 fn main() {
     let ps = syntax::parse::ParseSess::new();
-    let mut feature_gated_cfgs = vec![];
+    let mut resolver = syntax::ext::base::DummyResolver;
     let mut cx = syntax::ext::base::ExtCtxt::new(
-        &ps, vec![],
+        &ps,
         syntax::ext::expand::ExpansionConfig::default("qquote".to_string()),
-        &mut feature_gated_cfgs);
-    cx.bt_push(syntax::codemap::ExpnInfo {
-        call_site: DUMMY_SP,
-        callee: syntax::codemap::NameAndSpan {
-            format: syntax::codemap::MacroBang(parse::token::intern("")),
-            allow_internal_unstable: false,
-            span: None,
-        }
-    });
+        &mut resolver);
     let cx = &mut cx;
 
+    println!("{}", pprust::expr_to_string(&*quote_expr!(&cx, 23)));
     assert_eq!(pprust::expr_to_string(&*quote_expr!(&cx, 23)), "23");
 
     let expr = quote_expr!(&cx, let x isize = 20;);
+    println!("{}", pprust::expr_to_string(&*expr));
     assert_eq!(pprust::expr_to_string(&*expr), "let x isize = 20;");
 }

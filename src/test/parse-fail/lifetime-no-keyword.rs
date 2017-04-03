@@ -8,10 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// compile-flags: -Z parse-only
+// compile-flags: -Z parse-only -Z continue-parse-after-error
 
 fn foo<'a>(a: &'a isize) { }
 fn bar(a: &'static isize) { }
-fn baz(a: &'let isize) { } //~ ERROR invalid lifetime name
+fn baz(a: &'let isize) { } //~ ERROR lifetimes cannot use keyword names
+fn zab(a: &'self isize) { } //~ ERROR lifetimes cannot use keyword names
 
 fn main() { }

@@ -10,6 +10,8 @@
 
 use std::path::{self, Path, PathBuf};
 use std::ffi::OsString;
+use std::fs;
+use std::io;
 
 // Unfortunately, on windows, it looks like msvcrt.dll is silently translating
 // verbatim paths under the hood to non-verbatim paths! This manifests itself as
@@ -29,7 +31,7 @@ use std::ffi::OsString;
 //   https://github.com/rust-lang/rust/issues/25505#issuecomment-102876737
 pub fn fix_windows_verbatim_for_gcc(p: &Path) -> PathBuf {
     if !cfg!(windows) {
-        return p.to_path_buf()
+        return p.to_path_buf();
     }
     let mut components = p.components();
     let prefix = match components.next() {
@@ -51,5 +53,59 @@ pub fn fix_windows_verbatim_for_gcc(p: &Path) -> PathBuf {
             PathBuf::from(base)
         }
         _ => p.to_path_buf(),
+    }
+}
+
+pub enum LinkOrCopy {
+    Link,
+    Copy,
+}
+
+/// Copy `p` into `q`, preferring to use hard-linking if possible. If
+/// `q` already exists, it is removed first.
+/// The result indicates which of the two operations has been performed.
+pub fn link_or_copy<P: AsRef<Path>, Q: AsRef<Path>>(p: P, q: Q) -> io::Result<LinkOrCopy> {
+    let p = p.as_ref();
+    let q = q.as_ref();
+    if q.exists() {
+        fs::remove_file(&q)?;
+    }
+
+    match fs::hard_link(p, q) {
+        Ok(()) => Ok(LinkOrCopy::Link),
+        Err(_) => {
+            match fs::copy(p, q) {
+                Ok(_) => Ok(LinkOrCopy::Copy),
+                Err(e) => Err(e),
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum RenameOrCopyRemove {
+    Rename,
+    CopyRemove,
+}
+
+/// Rename `p` into `q`, preferring to use `rename` if possible.
+/// If `rename` fails (rename may fail for reasons such as crossing
+/// filesystem), fallback to copy & remove
+pub fn rename_or_copy_remove<P: AsRef<Path>, Q: AsRef<Path>>(p: P,
+                                                             q: Q)
+                                                             -> io::Result<RenameOrCopyRemove> {
+    let p = p.as_ref();
+    let q = q.as_ref();
+    match fs::rename(p, q) {
+        Ok(()) => Ok(RenameOrCopyRemove::Rename),
+        Err(_) => {
+            match fs::copy(p, q) {
+                Ok(_) => {
+                    fs::remove_file(p)?;
+                    Ok(RenameOrCopyRemove::CopyRemove)
+                }
+                Err(e) => Err(e),
+            }
+        }
     }
 }

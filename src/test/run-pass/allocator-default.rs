@@ -8,12 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(alloc_jemalloc, alloc_system)]
+#![feature(alloc_jemalloc)]
 
-#[cfg(not(any(target_env = "msvc", target_os = "bitrig", target_os = "openbsd")))]
+#[cfg(any(all(target_os = "linux", any(target_arch = "x86", target_arch = "x86_64")),
+          target_os = "macos"))]
 extern crate alloc_jemalloc;
-#[cfg(any(target_env = "msvc", target_os = "bitrig", target_os = "openbsd"))]
-extern crate alloc_system;
 
 fn main() {
     println!("{:?}", Box::new(3));

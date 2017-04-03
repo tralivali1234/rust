@@ -17,9 +17,9 @@
 /// The entry point for panic of Rust threads.
 ///
 /// This macro is used to inject panic into a Rust thread, causing the thread to
-/// unwind and panic entirely. Each thread's panic can be reaped as the
-/// `Box<Any>` type, and the single-argument form of the `panic!` macro will be
-/// the value which is transmitted.
+/// panic entirely. Each thread's panic can be reaped as the `Box<Any>` type,
+/// and the single-argument form of the `panic!` macro will be the value which
+/// is transmitted.
 ///
 /// The multi-argument form of this macro panics with a string and has the
 /// `format!` syntax for building a string.
@@ -41,14 +41,14 @@ macro_rules! panic {
         panic!("explicit panic")
     });
     ($msg:expr) => ({
-        $crate::rt::begin_unwind($msg, {
+        $crate::rt::begin_panic($msg, {
             // static requires less code at runtime, more constant data
             static _FILE_LINE: (&'static str, u32) = (file!(), line!());
             &_FILE_LINE
         })
     });
     ($fmt:expr, $($arg:tt)+) => ({
-        $crate::rt::begin_unwind_fmt(format_args!($fmt, $($arg)+), {
+        $crate::rt::begin_panic_fmt(&format_args!($fmt, $($arg)+), {
             // The leading _'s are to avoid dead code warnings if this is
             // used inside a dead function. Just `#[allow(dead_code)]` is
             // insufficient, since the user may have
@@ -98,7 +98,9 @@ macro_rules! print {
     ($($arg:tt)*) => ($crate::io::_print(format_args!($($arg)*)));
 }
 
-/// Macro for printing to the standard output, with a newline.
+/// Macro for printing to the standard output, with a newline. On all
+/// platforms, the newline is the LINE FEED character (`\n`/`U+000A`) alone
+/// (no additional CARRIAGE RETURN (`\r`/`U+000D`).
 ///
 /// Use the `format!` syntax to write data to the standard output.
 /// See `std::fmt` for more information.
@@ -110,12 +112,14 @@ macro_rules! print {
 /// # Examples
 ///
 /// ```
+/// println!(); // prints just a newline
 /// println!("hello there!");
 /// println!("format {} arguments", "some");
 /// ```
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
 macro_rules! println {
+    () => (print!("\n"));
     ($fmt:expr) => (print!(concat!($fmt, "\n")));
     ($fmt:expr, $($arg:tt)*) => (print!(concat!($fmt, "\n"), $($arg)*));
 }
@@ -173,18 +177,6 @@ macro_rules! select {
     })
 }
 
-// When testing the standard library, we link to the liblog crate to get the
-// logging macros. In doing so, the liblog crate was linked against the real
-// version of libstd, and uses a different std::fmt module than the test crate
-// uses. To get around this difference, we redefine the log!() macro here to be
-// just a dumb version of what it should be.
-#[cfg(test)]
-macro_rules! log {
-    ($lvl:expr, $($args:tt)*) => (
-        if log_enabled!($lvl) { println!($($args)*) }
-    )
-}
-
 #[cfg(test)]
 macro_rules! assert_approx_eq {
     ($a:expr, $b:expr) => ({
@@ -203,12 +195,18 @@ macro_rules! assert_approx_eq {
 pub mod builtin {
     /// The core macro for formatted string creation & output.
     ///
-    /// This macro produces a value of type `fmt::Arguments`. This value can be
-    /// passed to the functions in `std::fmt` for performing useful functions.
-    /// All other formatting macros (`format!`, `write!`, `println!`, etc) are
+    /// This macro produces a value of type [`fmt::Arguments`]. This value can be
+    /// passed to the functions in [`std::fmt`] for performing useful functions.
+    /// All other formatting macros ([`format!`], [`write!`], [`println!`], etc) are
     /// proxied through this one.
     ///
-    /// For more information, see the documentation in `std::fmt`.
+    /// For more information, see the documentation in [`std::fmt`].
+    ///
+    /// [`fmt::Arguments`]: ../std/fmt/struct.Arguments.html
+    /// [`std::fmt`]: ../std/fmt/index.html
+    /// [`format!`]: ../std/macro.format.html
+    /// [`write!`]: ../std/macro.write.html
+    /// [`println!`]: ../std/macro.println.html
     ///
     /// # Examples
     ///
@@ -269,9 +267,10 @@ pub mod builtin {
     /// This macro takes any number of comma-separated identifiers, and
     /// concatenates them all into one, yielding an expression which is a new
     /// identifier. Note that hygiene makes it such that this macro cannot
-    /// capture local variables, and macros are only allowed in item,
-    /// statement or expression position, meaning this macro may be difficult to
-    /// use in some situations.
+    /// capture local variables. Also, as a general rule, macros are only
+    /// allowed in item, statement or expression position. That means while
+    /// you may use this macro for referring to existing variables, functions or
+    /// modules etc, you cannot define a new one with it.
     ///
     /// # Examples
     ///
@@ -283,9 +282,11 @@ pub mod builtin {
     ///
     /// let f = concat_idents!(foo, bar);
     /// println!("{}", f());
+    ///
+    /// // fn concat_idents!(new, fun, name) { } // not usable in this way!
     /// # }
     /// ```
-    #[stable(feature = "rust1", since = "1.0.0")]
+    #[unstable(feature = "concat_idents_macro", issue = "29599")]
     #[macro_export]
     macro_rules! concat_idents {
         ($($e:ident),*) => ({ /* compiler built-in */ })
@@ -365,6 +366,9 @@ pub mod builtin {
     /// stringification of all the tokens passed to the macro. No restrictions
     /// are placed on the syntax of the macro invocation itself.
     ///
+    /// Note that the expanded results of the input tokens may change in the
+    /// future. You should be careful if you rely on the output.
+    ///
     /// # Examples
     ///
     /// ```
@@ -377,9 +381,11 @@ pub mod builtin {
 
     /// Includes a utf8-encoded file as a string.
     ///
+    /// The file is located relative to the current file. (similarly to how
+    /// modules are found)
+    ///
     /// This macro will yield an expression of type `&'static str` which is the
-    /// contents of the filename specified. The file is located relative to the
-    /// current file (similarly to how modules are found),
+    /// contents of the file.
     ///
     /// # Examples
     ///
@@ -392,9 +398,11 @@ pub mod builtin {
 
     /// Includes a file as a reference to a byte array.
     ///
+    /// The file is located relative to the current file. (similarly to how
+    /// modules are found)
+    ///
     /// This macro will yield an expression of type `&'static [u8; N]` which is
-    /// the contents of the filename specified. The file is located relative to
-    /// the current file (similarly to how modules are found),
+    /// the contents of the file.
     ///
     /// # Examples
     ///
@@ -433,7 +441,7 @@ pub mod builtin {
     /// leads to less duplicated code.
     ///
     /// The syntax given to this macro is the same syntax as [the `cfg`
-    /// attribute](../reference.html#conditional-compilation).
+    /// attribute](../book/conditional-compilation.html).
     ///
     /// # Examples
     ///
@@ -448,17 +456,40 @@ pub mod builtin {
     #[macro_export]
     macro_rules! cfg { ($($cfg:tt)*) => ({ /* compiler built-in */ }) }
 
-    /// Parse the current given file as an expression.
+    /// Parse a file as an expression or an item according to the context.
     ///
-    /// This is generally a bad idea, because it's going to behave unhygienically.
+    /// The file is located relative to the current file (similarly to how
+    /// modules are found).
+    ///
+    /// Using this macro is often a bad idea, because if the file is
+    /// parsed as an expression, it is going to be placed in the
+    /// surrounding code unhygienically. This could result in variables
+    /// or functions being different from what the file expected if
+    /// there are variables or functions that have the same name in
+    /// the current file.
     ///
     /// # Examples
     ///
+    /// Assume there are two files in the same directory with the following
+    /// contents:
+    ///
+    /// File 'my_str.in':
+    ///
     /// ```ignore
-    /// fn foo() {
-    ///     include!("/path/to/a/file")
+    /// "Hello World!"
+    /// ```
+    ///
+    /// File 'main.rs':
+    ///
+    /// ```ignore
+    /// fn main() {
+    ///     let my_str = include!("my_str.in");
+    ///     println!("{}", my_str);
     /// }
     /// ```
+    ///
+    /// Compiling 'main.rs' and running the resulting binary will print "Hello
+    /// World!".
     #[stable(feature = "rust1", since = "1.0.0")]
     #[macro_export]
     macro_rules! include { ($file:expr) => ({ /* compiler built-in */ }) }

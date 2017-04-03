@@ -78,18 +78,18 @@ pub use self::NamedMatch::*;
 pub use self::ParseResult::*;
 use self::TokenTreeOrTokenTreeVec::*;
 
-use ast;
-use ast::{TokenTree, Name, Ident};
-use codemap::{BytePos, mk_sp, Span, Spanned};
-use codemap;
-use parse::lexer::*; //resolve bug?
-use parse::ParseSess;
-use parse::parser::{LifetimeAndTypesWithoutColons, Parser};
-use parse::token::{DocComment, MatchNt, SubstNt};
-use parse::token::{Token, Nonterminal};
-use parse::token;
+use ast::Ident;
+use syntax_pos::{self, BytePos, Span};
+use codemap::Spanned;
+use errors::FatalError;
+use ext::tt::quoted::{self, TokenTree};
+use parse::{Directory, ParseSess};
+use parse::parser::{PathStyle, Parser};
+use parse::token::{self, DocComment, Token, Nonterminal};
 use print::pprust;
-use ptr::P;
+use symbol::keywords;
+use tokenstream::TokenStream;
+use util::small_vector::SmallVector;
 
 use std::mem;
 use std::rc::Rc;
@@ -101,8 +101,8 @@ use std::collections::hash_map::Entry::{Vacant, Occupied};
 
 #[derive(Clone)]
 enum TokenTreeOrTokenTreeVec {
-    Tt(ast::TokenTree),
-    TtSeq(Rc<Vec<ast::TokenTree>>),
+    Tt(TokenTree),
+    TtSeq(Vec<TokenTree>),
 }
 
 impl TokenTreeOrTokenTreeVec {
@@ -129,7 +129,7 @@ struct MatcherTtFrame {
 }
 
 #[derive(Clone)]
-pub struct MatcherPos {
+struct MatcherPos {
     stack: Vec<MatcherTtFrame>,
     top_elts: TokenTreeOrTokenTreeVec,
     sep: Option<Token>,
@@ -142,6 +142,8 @@ pub struct MatcherPos {
     sp_lo: BytePos,
 }
 
+pub type NamedParseResult = ParseResult<HashMap<Ident, Rc<NamedMatch>>>;
+
 pub fn count_names(ms: &[TokenTree]) -> usize {
     ms.iter().fold(0, |count, elt| {
         count + match *elt {
@@ -151,22 +153,21 @@ pub fn count_names(ms: &[TokenTree]) -> usize {
             TokenTree::Delimited(_, ref delim) => {
                 count_names(&delim.tts)
             }
-            TokenTree::Token(_, MatchNt(..)) => {
+            TokenTree::MetaVarDecl(..) => {
                 1
             }
-            TokenTree::Token(_, _) => 0,
+            TokenTree::Token(..) => 0,
         }
     })
 }
 
-pub fn initial_matcher_pos(ms: Rc<Vec<TokenTree>>, sep: Option<Token>, lo: BytePos)
-                           -> Box<MatcherPos> {
+fn initial_matcher_pos(ms: Vec<TokenTree>, lo: BytePos) -> Box<MatcherPos> {
     let match_idx_hi = count_names(&ms[..]);
-    let matches: Vec<_> = (0..match_idx_hi).map(|_| Vec::new()).collect();
+    let matches = create_matches(match_idx_hi);
     Box::new(MatcherPos {
         stack: vec![],
         top_elts: TtSeq(ms),
-        sep: sep,
+        sep: None,
         idx: 0,
         up: None,
         matches: matches,
@@ -195,50 +196,50 @@ pub fn initial_matcher_pos(ms: Rc<Vec<TokenTree>>, sep: Option<Token>, lo: ByteP
 /// token tree it was derived from.
 
 pub enum NamedMatch {
-    MatchedSeq(Vec<Rc<NamedMatch>>, codemap::Span),
-    MatchedNonterminal(Nonterminal)
+    MatchedSeq(Vec<Rc<NamedMatch>>, syntax_pos::Span),
+    MatchedNonterminal(Rc<Nonterminal>)
 }
 
-pub fn nameize(p_s: &ParseSess, ms: &[TokenTree], res: &[Rc<NamedMatch>])
-            -> ParseResult<HashMap<Name, Rc<NamedMatch>>> {
-    fn n_rec(p_s: &ParseSess, m: &TokenTree, res: &[Rc<NamedMatch>],
-             ret_val: &mut HashMap<Name, Rc<NamedMatch>>, idx: &mut usize)
-             -> Result<(), (codemap::Span, String)> {
+fn nameize<I: Iterator<Item=Rc<NamedMatch>>>(sess: &ParseSess, ms: &[TokenTree], mut res: I)
+                                             -> NamedParseResult {
+    fn n_rec<I: Iterator<Item=Rc<NamedMatch>>>(sess: &ParseSess, m: &TokenTree, mut res: &mut I,
+             ret_val: &mut HashMap<Ident, Rc<NamedMatch>>)
+             -> Result<(), (syntax_pos::Span, String)> {
         match *m {
             TokenTree::Sequence(_, ref seq) => {
                 for next_m in &seq.tts {
-                    try!(n_rec(p_s, next_m, res, ret_val, idx))
+                    n_rec(sess, next_m, res.by_ref(), ret_val)?
                 }
             }
             TokenTree::Delimited(_, ref delim) => {
                 for next_m in &delim.tts {
-                    try!(n_rec(p_s, next_m, res, ret_val, idx));
+                    n_rec(sess, next_m, res.by_ref(), ret_val)?;
                 }
             }
-            TokenTree::Token(sp, MatchNt(bind_name, _, _, _)) => {
-                match ret_val.entry(bind_name.name) {
+            TokenTree::MetaVarDecl(span, _, id) if id.name == keywords::Invalid.name() => {
+                if sess.missing_fragment_specifiers.borrow_mut().remove(&span) {
+                    return Err((span, "missing fragment specifier".to_string()));
+                }
+            }
+            TokenTree::MetaVarDecl(sp, bind_name, _) => {
+                match ret_val.entry(bind_name) {
                     Vacant(spot) => {
-                        spot.insert(res[*idx].clone());
-                        *idx += 1;
+                        spot.insert(res.next().unwrap());
                     }
                     Occupied(..) => {
                         return Err((sp, format!("duplicated bind name: {}", bind_name)))
                     }
                 }
             }
-            TokenTree::Token(sp, SubstNt(..)) => {
-                return Err((sp, "missing fragment specifier".to_string()))
-            }
-            TokenTree::Token(_, _) => (),
+            TokenTree::Token(..) => (),
         }
 
         Ok(())
     }
 
     let mut ret_val = HashMap::new();
-    let mut idx = 0;
     for m in ms {
-        match n_rec(p_s, m, res, &mut ret_val, &mut idx) {
+        match n_rec(sess, m, res.by_ref(), &mut ret_val) {
             Ok(_) => {},
             Err((sp, msg)) => return Error(sp, msg),
         }
@@ -249,303 +250,287 @@ pub fn nameize(p_s: &ParseSess, ms: &[TokenTree], res: &[Rc<NamedMatch>])
 
 pub enum ParseResult<T> {
     Success(T),
-    /// Arm failed to match
-    Failure(codemap::Span, String),
+    /// Arm failed to match. If the second parameter is `token::Eof`, it
+    /// indicates an unexpected end of macro invocation. Otherwise, it
+    /// indicates that no rules expected the given token.
+    Failure(syntax_pos::Span, Token),
     /// Fatal error (malformed macro?). Abort compilation.
-    Error(codemap::Span, String)
+    Error(syntax_pos::Span, String)
 }
 
-pub type NamedParseResult = ParseResult<HashMap<Name, Rc<NamedMatch>>>;
-pub type PositionalParseResult = ParseResult<Vec<Rc<NamedMatch>>>;
+pub fn parse_failure_msg(tok: Token) -> String {
+    match tok {
+        token::Eof => "unexpected end of macro invocation".to_string(),
+        _ => format!("no rules expected the token `{}`", pprust::token_to_string(&tok)),
+    }
+}
 
-/// Perform a token equality check, ignoring syntax context (that is, an
-/// unhygienic comparison)
-pub fn token_name_eq(t1 : &Token, t2 : &Token) -> bool {
+/// Perform a token equality check, ignoring syntax context (that is, an unhygienic comparison)
+fn token_name_eq(t1 : &Token, t2 : &Token) -> bool {
     match (t1,t2) {
-        (&token::Ident(id1,_),&token::Ident(id2,_))
+        (&token::Ident(id1),&token::Ident(id2))
         | (&token::Lifetime(id1),&token::Lifetime(id2)) =>
             id1.name == id2.name,
         _ => *t1 == *t2
     }
 }
 
-pub fn parse(sess: &ParseSess,
-             cfg: ast::CrateConfig,
-             mut rdr: TtReader,
-             ms: &[TokenTree])
-             -> NamedParseResult {
-    let mut cur_eis = Vec::new();
-    cur_eis.push(initial_matcher_pos(Rc::new(ms.iter()
-                                                .cloned()
-                                                .collect()),
-                                     None,
-                                     rdr.peek().sp.lo));
+fn create_matches(len: usize) -> Vec<Vec<Rc<NamedMatch>>> {
+    (0..len).into_iter().map(|_| Vec::new()).collect()
+}
 
-    loop {
-        let mut bb_eis = Vec::new(); // black-box parsed by parser.rs
-        let mut next_eis = Vec::new(); // or proceed normally
-        let mut eof_eis = Vec::new();
-
-        let TokenAndSpan { tok, sp } = rdr.peek();
-
-        /* we append new items to this while we go */
-        loop {
-            let mut ei = match cur_eis.pop() {
-                None => break, /* for each Earley Item */
-                Some(ei) => ei,
-            };
-
-            // When unzipped trees end, remove them
-            while ei.idx >= ei.top_elts.len() {
-                match ei.stack.pop() {
-                    Some(MatcherTtFrame { elts, idx }) => {
-                        ei.top_elts = elts;
-                        ei.idx = idx + 1;
-                    }
-                    None => break
+fn inner_parse_loop(sess: &ParseSess,
+                    cur_eis: &mut SmallVector<Box<MatcherPos>>,
+                    next_eis: &mut Vec<Box<MatcherPos>>,
+                    eof_eis: &mut SmallVector<Box<MatcherPos>>,
+                    bb_eis: &mut SmallVector<Box<MatcherPos>>,
+                    token: &Token,
+                    span: syntax_pos::Span)
+                    -> ParseResult<()> {
+    while let Some(mut ei) = cur_eis.pop() {
+        // When unzipped trees end, remove them
+        while ei.idx >= ei.top_elts.len() {
+            match ei.stack.pop() {
+                Some(MatcherTtFrame { elts, idx }) => {
+                    ei.top_elts = elts;
+                    ei.idx = idx + 1;
                 }
+                None => break
             }
+        }
 
-            let idx = ei.idx;
-            let len = ei.top_elts.len();
+        let idx = ei.idx;
+        let len = ei.top_elts.len();
 
-            /* at end of sequence */
-            if idx >= len {
-                // can't move out of `match`es, so:
-                if ei.up.is_some() {
-                    // hack: a matcher sequence is repeating iff it has a
-                    // parent (the top level is just a container)
+        // at end of sequence
+        if idx >= len {
+            // We are repeating iff there is a parent
+            if ei.up.is_some() {
+                // Disregarding the separator, add the "up" case to the tokens that should be
+                // examined.
+                // (remove this condition to make trailing seps ok)
+                if idx == len {
+                    let mut new_pos = ei.up.clone().unwrap();
 
+                    // update matches (the MBE "parse tree") by appending
+                    // each tree as a subtree.
 
-                    // disregard separator, try to go up
-                    // (remove this condition to make trailing seps ok)
-                    if idx == len {
-                        // pop from the matcher position
+                    // I bet this is a perf problem: we're preemptively
+                    // doing a lot of array work that will get thrown away
+                    // most of the time.
 
-                        let mut new_pos = ei.up.clone().unwrap();
-
-                        // update matches (the MBE "parse tree") by appending
-                        // each tree as a subtree.
-
-                        // I bet this is a perf problem: we're preemptively
-                        // doing a lot of array work that will get thrown away
-                        // most of the time.
-
-                        // Only touch the binders we have actually bound
-                        for idx in ei.match_lo..ei.match_hi {
-                            let sub = (ei.matches[idx]).clone();
-                            (&mut new_pos.matches[idx])
-                                   .push(Rc::new(MatchedSeq(sub, mk_sp(ei.sp_lo,
-                                                                       sp.hi))));
-                        }
-
-                        new_pos.match_cur = ei.match_hi;
-                        new_pos.idx += 1;
-                        cur_eis.push(new_pos);
+                    // Only touch the binders we have actually bound
+                    for idx in ei.match_lo..ei.match_hi {
+                        let sub = ei.matches[idx].clone();
+                        new_pos.matches[idx]
+                            .push(Rc::new(MatchedSeq(sub, Span { lo: ei.sp_lo, ..span })));
                     }
 
-                    // can we go around again?
+                    new_pos.match_cur = ei.match_hi;
+                    new_pos.idx += 1;
+                    cur_eis.push(new_pos);
+                }
 
-                    // the *_t vars are workarounds for the lack of unary move
-                    match ei.sep {
-                        Some(ref t) if idx == len => { // we need a separator
-                            // i'm conflicted about whether this should be hygienic....
-                            // though in this case, if the separators are never legal
-                            // idents, it shouldn't matter.
-                            if token_name_eq(&tok, t) { //pass the separator
-                                let mut ei_t = ei.clone();
-                                // ei_t.match_cur = ei_t.match_lo;
-                                ei_t.idx += 1;
-                                next_eis.push(ei_t);
-                            }
-                        }
-                        _ => { // we don't need a separator
-                            let mut ei_t = ei;
-                            ei_t.match_cur = ei_t.match_lo;
-                            ei_t.idx = 0;
-                            cur_eis.push(ei_t);
-                        }
+                // Check if we need a separator
+                if idx == len && ei.sep.is_some() {
+                    // We have a separator, and it is the current token.
+                    if ei.sep.as_ref().map(|ref sep| token_name_eq(&token, sep)).unwrap_or(false) {
+                        ei.idx += 1;
+                        next_eis.push(ei);
                     }
-                } else {
-                    eof_eis.push(ei);
+                } else { // we don't need a separator
+                    ei.match_cur = ei.match_lo;
+                    ei.idx = 0;
+                    cur_eis.push(ei);
                 }
             } else {
-                match ei.top_elts.get_tt(idx) {
-                    /* need to descend into sequence */
-                    TokenTree::Sequence(sp, seq) => {
-                        if seq.op == ast::ZeroOrMore {
-                            let mut new_ei = ei.clone();
-                            new_ei.match_cur += seq.num_captures;
-                            new_ei.idx += 1;
-                            //we specifically matched zero repeats.
-                            for idx in ei.match_cur..ei.match_cur + seq.num_captures {
-                                (&mut new_ei.matches[idx]).push(Rc::new(MatchedSeq(vec![], sp)));
-                            }
+                // We aren't repeating, so we must be potentially at the end of the input.
+                eof_eis.push(ei);
+            }
+        } else {
+            match ei.top_elts.get_tt(idx) {
+                /* need to descend into sequence */
+                TokenTree::Sequence(sp, seq) => {
+                    if seq.op == quoted::KleeneOp::ZeroOrMore {
+                        // Examine the case where there are 0 matches of this sequence
+                        let mut new_ei = ei.clone();
+                        new_ei.match_cur += seq.num_captures;
+                        new_ei.idx += 1;
+                        for idx in ei.match_cur..ei.match_cur + seq.num_captures {
+                            new_ei.matches[idx].push(Rc::new(MatchedSeq(vec![], sp)));
+                        }
+                        cur_eis.push(new_ei);
+                    }
 
-                            cur_eis.push(new_ei);
-                        }
-
-                        let matches: Vec<_> = (0..ei.matches.len())
-                            .map(|_| Vec::new()).collect();
-                        let ei_t = ei;
-                        cur_eis.push(Box::new(MatcherPos {
-                            stack: vec![],
-                            sep: seq.separator.clone(),
-                            idx: 0,
-                            matches: matches,
-                            match_lo: ei_t.match_cur,
-                            match_cur: ei_t.match_cur,
-                            match_hi: ei_t.match_cur + seq.num_captures,
-                            up: Some(ei_t),
-                            sp_lo: sp.lo,
-                            top_elts: Tt(TokenTree::Sequence(sp, seq)),
-                        }));
+                    // Examine the case where there is at least one match of this sequence
+                    let matches = create_matches(ei.matches.len());
+                    cur_eis.push(Box::new(MatcherPos {
+                        stack: vec![],
+                        sep: seq.separator.clone(),
+                        idx: 0,
+                        matches: matches,
+                        match_lo: ei.match_cur,
+                        match_cur: ei.match_cur,
+                        match_hi: ei.match_cur + seq.num_captures,
+                        up: Some(ei),
+                        sp_lo: sp.lo,
+                        top_elts: Tt(TokenTree::Sequence(sp, seq)),
+                    }));
+                }
+                TokenTree::MetaVarDecl(span, _, id) if id.name == keywords::Invalid.name() => {
+                    if sess.missing_fragment_specifiers.borrow_mut().remove(&span) {
+                        return Error(span, "missing fragment specifier".to_string());
                     }
-                    TokenTree::Token(_, MatchNt(..)) => {
-                        // Built-in nonterminals never start with these tokens,
-                        // so we can eliminate them from consideration.
-                        match tok {
-                            token::CloseDelim(_) => {},
-                            _ => bb_eis.push(ei),
-                        }
+                }
+                TokenTree::MetaVarDecl(..) => {
+                    // Built-in nonterminals never start with these tokens,
+                    // so we can eliminate them from consideration.
+                    match *token {
+                        token::CloseDelim(_) => {},
+                        _ => bb_eis.push(ei),
                     }
-                    TokenTree::Token(sp, SubstNt(..)) => {
-                        return Error(sp, "missing fragment specifier".to_string())
-                    }
-                    seq @ TokenTree::Delimited(..) | seq @ TokenTree::Token(_, DocComment(..)) => {
-                        let lower_elts = mem::replace(&mut ei.top_elts, Tt(seq));
-                        let idx = ei.idx;
-                        ei.stack.push(MatcherTtFrame {
-                            elts: lower_elts,
-                            idx: idx,
-                        });
-                        ei.idx = 0;
-                        cur_eis.push(ei);
-                    }
-                    TokenTree::Token(_, ref t) => {
-                        let mut ei_t = ei.clone();
-                        if token_name_eq(t,&tok) {
-                            ei_t.idx += 1;
-                            next_eis.push(ei_t);
-                        }
+                }
+                seq @ TokenTree::Delimited(..) | seq @ TokenTree::Token(_, DocComment(..)) => {
+                    let lower_elts = mem::replace(&mut ei.top_elts, Tt(seq));
+                    let idx = ei.idx;
+                    ei.stack.push(MatcherTtFrame {
+                        elts: lower_elts,
+                        idx: idx,
+                    });
+                    ei.idx = 0;
+                    cur_eis.push(ei);
+                }
+                TokenTree::Token(_, ref t) => {
+                    if token_name_eq(t, &token) {
+                        ei.idx += 1;
+                        next_eis.push(ei);
                     }
                 }
             }
         }
+    }
+
+    Success(())
+}
+
+pub fn parse(sess: &ParseSess, tts: TokenStream, ms: &[TokenTree], directory: Option<Directory>)
+             -> NamedParseResult {
+    let mut parser = Parser::new(sess, tts, directory, true);
+    let mut cur_eis = SmallVector::one(initial_matcher_pos(ms.to_owned(), parser.span.lo));
+    let mut next_eis = Vec::new(); // or proceed normally
+
+    loop {
+        let mut bb_eis = SmallVector::new(); // black-box parsed by parser.rs
+        let mut eof_eis = SmallVector::new();
+        assert!(next_eis.is_empty());
+
+        match inner_parse_loop(sess, &mut cur_eis, &mut next_eis, &mut eof_eis, &mut bb_eis,
+                               &parser.token, parser.span) {
+            Success(_) => {},
+            Failure(sp, tok) => return Failure(sp, tok),
+            Error(sp, msg) => return Error(sp, msg),
+        }
+
+        // inner parse loop handled all cur_eis, so it's empty
+        assert!(cur_eis.is_empty());
 
         /* error messages here could be improved with links to orig. rules */
-        if token_name_eq(&tok, &token::Eof) {
+        if token_name_eq(&parser.token, &token::Eof) {
             if eof_eis.len() == 1 {
-                let mut v = Vec::new();
-                for dv in &mut (&mut eof_eis[0]).matches {
-                    v.push(dv.pop().unwrap());
-                }
-                return nameize(sess, ms, &v[..]);
+                let matches = eof_eis[0].matches.iter_mut().map(|mut dv| dv.pop().unwrap());
+                return nameize(sess, ms, matches);
             } else if eof_eis.len() > 1 {
-                return Error(sp, "ambiguity: multiple successful parses".to_string());
+                return Error(parser.span, "ambiguity: multiple successful parses".to_string());
             } else {
-                return Failure(sp, "unexpected end of macro invocation".to_string());
+                return Failure(parser.span, token::Eof);
             }
-        } else {
-            if (!bb_eis.is_empty() && !next_eis.is_empty())
-                || bb_eis.len() > 1 {
-                let nts = bb_eis.iter().map(|ei| match ei.top_elts.get_tt(ei.idx) {
-                    TokenTree::Token(_, MatchNt(bind, name, _, _)) => {
-                        format!("{} ('{}')", name, bind)
-                    }
-                    _ => panic!()
-                }).collect::<Vec<String>>().join(" or ");
-
-                return Error(sp, format!(
-                    "local ambiguity: multiple parsing options: {}",
-                    match next_eis.len() {
-                        0 => format!("built-in NTs {}.", nts),
-                        1 => format!("built-in NTs {} or 1 other option.", nts),
-                        n => format!("built-in NTs {} or {} other options.", nts, n),
-                    }
-                ))
-            } else if bb_eis.is_empty() && next_eis.is_empty() {
-                return Failure(sp, format!("no rules expected the token `{}`",
-                            pprust::token_to_string(&tok)));
-            } else if !next_eis.is_empty() {
-                /* Now process the next token */
-                while !next_eis.is_empty() {
-                    cur_eis.push(next_eis.pop().unwrap());
+        } else if (!bb_eis.is_empty() && !next_eis.is_empty()) || bb_eis.len() > 1 {
+            let nts = bb_eis.iter().map(|ei| match ei.top_elts.get_tt(ei.idx) {
+                TokenTree::MetaVarDecl(_, bind, name) => {
+                    format!("{} ('{}')", name, bind)
                 }
-                rdr.next_token();
-            } else /* bb_eis.len() == 1 */ {
-                let mut rust_parser = Parser::new(sess, cfg.clone(), Box::new(rdr.clone()));
+                _ => panic!()
+            }).collect::<Vec<String>>().join(" or ");
 
-                let mut ei = bb_eis.pop().unwrap();
-                match ei.top_elts.get_tt(ei.idx) {
-                    TokenTree::Token(span, MatchNt(_, ident, _, _)) => {
-                        let match_cur = ei.match_cur;
-                        (&mut ei.matches[match_cur]).push(Rc::new(MatchedNonterminal(
-                            parse_nt(&mut rust_parser, span, &ident.name.as_str()))));
-                        ei.idx += 1;
-                        ei.match_cur += 1;
-                    }
-                    _ => panic!()
+            return Error(parser.span, format!(
+                "local ambiguity: multiple parsing options: {}",
+                match next_eis.len() {
+                    0 => format!("built-in NTs {}.", nts),
+                    1 => format!("built-in NTs {} or 1 other option.", nts),
+                    n => format!("built-in NTs {} or {} other options.", nts, n),
                 }
-                cur_eis.push(ei);
-
-                for _ in 0..rust_parser.tokens_consumed {
-                    let _ = rdr.next_token();
-                }
+            ));
+        } else if bb_eis.is_empty() && next_eis.is_empty() {
+            return Failure(parser.span, parser.token);
+        } else if !next_eis.is_empty() {
+            /* Now process the next token */
+            cur_eis.extend(next_eis.drain(..));
+            parser.bump();
+        } else /* bb_eis.len() == 1 */ {
+            let mut ei = bb_eis.pop().unwrap();
+            if let TokenTree::MetaVarDecl(span, _, ident) = ei.top_elts.get_tt(ei.idx) {
+                let match_cur = ei.match_cur;
+                ei.matches[match_cur].push(Rc::new(MatchedNonterminal(
+                            Rc::new(parse_nt(&mut parser, span, &ident.name.as_str())))));
+                ei.idx += 1;
+                ei.match_cur += 1;
+            } else {
+                unreachable!()
             }
+            cur_eis.push(ei);
         }
 
         assert!(!cur_eis.is_empty());
     }
 }
 
-pub fn parse_nt(p: &mut Parser, sp: Span, name: &str) -> Nonterminal {
+fn parse_nt<'a>(p: &mut Parser<'a>, sp: Span, name: &str) -> Nonterminal {
     match name {
         "tt" => {
-            p.quote_depth += 1; //but in theory, non-quoted tts might be useful
-            let res = token::NtTT(P(panictry!(p.parse_token_tree())));
-            p.quote_depth -= 1;
-            return res;
+            return token::NtTT(p.parse_token_tree());
         }
         _ => {}
     }
     // check at the beginning and the parser checks after each bump
-    panictry!(p.check_unknown_macro_variable());
+    p.process_potential_macro_variable();
     match name {
         "item" => match panictry!(p.parse_item()) {
             Some(i) => token::NtItem(i),
-            None => panic!(p.fatal("expected an item keyword"))
+            None => {
+                p.fatal("expected an item keyword").emit();
+                panic!(FatalError);
+            }
         },
         "block" => token::NtBlock(panictry!(p.parse_block())),
         "stmt" => match panictry!(p.parse_stmt()) {
             Some(s) => token::NtStmt(s),
-            None => panic!(p.fatal("expected a statement"))
+            None => {
+                p.fatal("expected a statement").emit();
+                panic!(FatalError);
+            }
         },
         "pat" => token::NtPat(panictry!(p.parse_pat())),
         "expr" => token::NtExpr(panictry!(p.parse_expr())),
         "ty" => token::NtTy(panictry!(p.parse_ty())),
         // this could be handled like a token, since it is one
         "ident" => match p.token {
-            token::Ident(sn,b) => {
-                panictry!(p.bump());
-                token::NtIdent(Box::new(Spanned::<Ident>{node: sn, span: p.span}),b)
+            token::Ident(sn) => {
+                p.bump();
+                token::NtIdent(Spanned::<Ident>{node: sn, span: p.prev_span})
             }
             _ => {
                 let token_str = pprust::token_to_string(&p.token);
-                panic!(p.fatal(&format!("expected ident, found {}",
-                                 &token_str[..])))
+                p.fatal(&format!("expected ident, found {}",
+                                 &token_str[..])).emit();
+                panic!(FatalError)
             }
         },
         "path" => {
-            token::NtPath(Box::new(panictry!(p.parse_path(LifetimeAndTypesWithoutColons))))
+            token::NtPath(panictry!(p.parse_path(PathStyle::Type)))
         },
         "meta" => token::NtMeta(panictry!(p.parse_meta_item())),
-        _ => {
-            panic!(p.span_fatal_help(sp,
-                            &format!("invalid fragment specifier `{}`", name),
-                            "valid fragment specifiers are `ident`, `block`, \
-                             `stmt`, `expr`, `pat`, `ty`, `path`, `meta`, `tt` \
-                             and `item`"))
-        }
+        // this is not supposed to happen, since it has been checked
+        // when compiling the macro.
+        _ => p.span_bug(sp, "invalid fragment specifier")
     }
 }

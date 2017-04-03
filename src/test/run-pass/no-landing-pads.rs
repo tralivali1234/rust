@@ -9,7 +9,7 @@
 // except according to those terms.
 
 // compile-flags: -Z no-landing-pads
-
+// ignore-emscripten no threads support
 
 use std::thread;
 
@@ -27,6 +27,6 @@ fn main() {
     thread::spawn(move|| -> () {
         let _a = A;
         panic!();
-    }).join().err().unwrap();
+    }).join().unwrap_err();
     assert!(unsafe { !HIT });
 }

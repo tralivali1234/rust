@@ -15,19 +15,24 @@ use bar::c::cc as cal;
 
 use std::mem::*;            // shouldn't get errors for not using
                             // everything imported
+use std::fmt::{};
+//~^ ERROR unused import: `use std::fmt::{};`
 
 // Should get errors for both 'Some' and 'None'
-use std::option::Option::{Some, None}; //~ ERROR unused import
-                                     //~^ ERROR unused import
+use std::option::Option::{Some, None};
+//~^ ERROR unused imports: `None`, `Some`
+//~| ERROR unused imports: `None`, `Some`
 
-use test::A;       //~ ERROR unused import
+use test::A;       //~ ERROR unused import: `test::A`
 // Be sure that if we just bring some methods into scope that they're also
 // counted as being used.
 use test::B;
+// But only when actually used: do not get confused by the method with the same name.
+use test::B2; //~ ERROR unused import: `test::B2`
 
 // Make sure this import is warned about when at least one of its imported names
 // is unused
-use test2::{foo, bar}; //~ ERROR unused import
+use test2::{foo, bar}; //~ ERROR unused import: `bar`
 
 mod test2 {
     pub fn foo() {}
@@ -37,6 +42,7 @@ mod test2 {
 mod test {
     pub trait A { fn a(&self) {} }
     pub trait B { fn b(&self) {} }
+    pub trait B2 { fn b(&self) {} }
     pub struct C;
     impl A for C {}
     impl B for C {}
@@ -54,9 +60,12 @@ mod bar {
 
     pub mod c {
         use foo::Point;
-        use foo::Square; //~ ERROR unused import
+        use foo::Square; //~ ERROR unused import: `foo::Square`
         pub fn cc(_p: Point) -> super::Square {
-            super::Square
+            fn f() -> super::Square {
+                super::Square
+            }
+            f()
         }
     }
 
@@ -64,6 +73,20 @@ mod bar {
     mod foo {
         use std::cmp::PartialEq;
     }
+}
+
+fn g() {
+    use self::g; //~ ERROR unused import: `self::g`
+    fn f() {
+        self::g();
+    }
+}
+
+// c.f. issue #35135
+#[allow(unused_variables)]
+fn h() {
+    use test2::foo; //~ ERROR unused import: `test2::foo`
+    let foo = 0;
 }
 
 fn main() {

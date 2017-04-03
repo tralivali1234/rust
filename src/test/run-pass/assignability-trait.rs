@@ -12,9 +12,6 @@
 // making method calls, but only if there aren't any matches without
 // it.
 
-
-#![feature(unboxed_closures)]
-
 trait iterable<A> {
     fn iterate<F>(&self, blk: F) -> bool where F: FnMut(&A) -> bool;
 }
@@ -41,7 +38,7 @@ fn length<A, T: iterable<A>>(x: T) -> usize {
 }
 
 pub fn main() {
-    let x: Vec<isize> = vec!(0,1,2,3);
+    let x: Vec<isize> = vec![0,1,2,3];
     // Call a method
     x.iterate(|y| { assert_eq!(x[*y as usize], *y); true });
     // Call a parameterized function

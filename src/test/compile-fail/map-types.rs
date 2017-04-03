@@ -10,8 +10,6 @@
 
 #![feature(box_syntax)]
 
-extern crate collections;
-
 use std::collections::HashMap;
 
 trait Map<K, V>
@@ -26,7 +24,6 @@ impl<K, V> Map<K, V> for HashMap<K, V> {}
 fn main() {
     let x: Box<HashMap<isize, isize>> = box HashMap::new();
     let x: Box<Map<isize, isize>> = x;
-    // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
     let y: Box<Map<usize, isize>> = Box::new(x);
-    //~^ ERROR the trait `Map<usize, isize>` is not implemented
+    //~^ ERROR `std::boxed::Box<Map<isize, isize>>: Map<usize, isize>` is not satisfied
 }

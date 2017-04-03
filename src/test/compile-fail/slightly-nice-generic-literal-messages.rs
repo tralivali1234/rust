@@ -16,10 +16,9 @@ fn main() {
     match Foo(1.1, marker::PhantomData) {
         1 => {}
     //~^ ERROR mismatched types
-    //~| expected `Foo<_, _>`
-    //~| found `_`
-    //~| expected struct `Foo`
-    //~| found integral variable
+    //~| expected type `Foo<{float}, _>`
+    //~| found type `{integer}`
+    //~| expected struct `Foo`, found integral variable
     }
 
 }

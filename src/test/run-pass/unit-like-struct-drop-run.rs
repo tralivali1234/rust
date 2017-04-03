@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// ignore-emscripten no threads support
+
 // Make sure the destructor is run for unit-like structs.
 
 
@@ -28,6 +30,6 @@ pub fn main() {
         let _b = Foo;
     }).join();
 
-    let s = x.err().unwrap().downcast::<&'static str>().unwrap();
+    let s = x.unwrap_err().downcast::<&'static str>().unwrap();
     assert_eq!(&**s, "This panic should happen.");
 }

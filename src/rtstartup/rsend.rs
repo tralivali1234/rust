@@ -10,14 +10,18 @@
 
 // See rsbegin.rs for details.
 
-#![cfg_attr(stage0, feature(no_std))]
-
+#![feature(no_core, lang_items)]
 #![crate_type="rlib"]
-#![no_std]
+#![no_core]
+
+#[lang = "sized"]
+trait Sized {}
+#[lang = "sync"]
+trait Sync {}
+impl<T> Sync for T {}
 
 #[cfg(all(target_os="windows", target_arch = "x86", target_env="gnu"))]
-pub mod eh_frames
-{
+pub mod eh_frames {
     // Terminate the frame unwind info section with a 0 as a sentinel;
     // this would be the 'length' field in a real FDE.
     #[no_mangle]

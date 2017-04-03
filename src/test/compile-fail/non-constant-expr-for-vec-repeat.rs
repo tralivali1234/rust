@@ -13,6 +13,7 @@
 fn main() {
     fn bar(n: usize) {
         let _x = [0; n];
-        //~^ ERROR expected constant integer for repeat count, found variable
+        //~^ ERROR attempt to use a non-constant value in a constant [E0435]
+        //~| NOTE non-constant used with constant
     }
 }

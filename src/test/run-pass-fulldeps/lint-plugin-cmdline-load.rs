@@ -10,8 +10,9 @@
 
 // aux-build:lint_plugin_test.rs
 // ignore-stage1
-// ignore-pretty: Random space appears with the pretty test
 // compile-flags: -Z extra-plugins=lint_plugin_test
+
+#![allow(dead_code)]
 
 fn lintme() { } //~ WARNING item is named 'lintme'
 

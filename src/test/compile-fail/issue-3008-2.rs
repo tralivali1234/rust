@@ -8,11 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(static_recursion)]
-
 enum foo { foo_(bar) }
 struct bar { x: bar }
-//~^ ERROR invalid recursive struct type
+//~^ ERROR E0072
+//~| NOTE recursive type has infinite size
 
 fn main() {
 }

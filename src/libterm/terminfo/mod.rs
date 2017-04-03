@@ -109,7 +109,7 @@ impl TermInfo {
     }
     // Keep the metadata small
     fn _from_path(path: &Path) -> Result<TermInfo, Error> {
-        let file = try!(File::open(path).map_err(|e| Error::IoError(e)));
+        let file = File::open(path).map_err(|e| Error::IoError(e))?;
         let mut reader = BufReader::new(file);
         parse(&mut reader, false).map_err(|e| Error::MalformedTerminfo(e))
     }
@@ -151,7 +151,7 @@ pub struct TerminfoTerminal<T> {
     ti: TermInfo,
 }
 
-impl<T: Write+Send> Terminal for TerminfoTerminal<T> {
+impl<T: Write + Send> Terminal for TerminfoTerminal<T> {
     type Output = T;
     fn fg(&mut self, color: color::Color) -> io::Result<bool> {
         let color = self.dim_if_necessary(color);
@@ -190,7 +190,7 @@ impl<T: Write+Send> Terminal for TerminfoTerminal<T> {
     fn reset(&mut self) -> io::Result<bool> {
         // are there any terminals that have color/attrs and not sgr0?
         // Try falling back to sgr, then op
-        let cmd = match ["sg0", "sgr", "op"]
+        let cmd = match ["sgr0", "sgr", "op"]
                             .iter()
                             .filter_map(|cap| self.ti.strings.get(*cap))
                             .next() {
@@ -205,11 +205,11 @@ impl<T: Write+Send> Terminal for TerminfoTerminal<T> {
         self.out.write_all(&cmd).and(Ok(true))
     }
 
-    fn get_ref<'a>(&'a self) -> &'a T {
+    fn get_ref(&self) -> &T {
         &self.out
     }
 
-    fn get_mut<'a>(&'a mut self) -> &'a mut T {
+    fn get_mut(&mut self) -> &mut T {
         &mut self.out
     }
 
@@ -220,7 +220,7 @@ impl<T: Write+Send> Terminal for TerminfoTerminal<T> {
     }
 }
 
-impl<T: Write+Send> TerminfoTerminal<T> {
+impl<T: Write + Send> TerminfoTerminal<T> {
     /// Create a new TerminfoTerminal with the given TermInfo and Write.
     pub fn new_with_terminfo(out: T, terminfo: TermInfo) -> TerminfoTerminal<T> {
         let nc = if terminfo.strings.contains_key("setaf") &&

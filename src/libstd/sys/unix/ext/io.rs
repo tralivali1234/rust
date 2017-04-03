@@ -33,7 +33,7 @@ pub trait AsRawFd {
     /// Extracts the raw file descriptor.
     ///
     /// This method does **not** pass ownership of the raw file descriptor
-    /// to the caller. The descriptor is only guarantee to be valid while
+    /// to the caller. The descriptor is only guaranteed to be valid while
     /// the original object has not yet been destroyed.
     #[stable(feature = "rust1", since = "1.0.0")]
     fn as_raw_fd(&self) -> RawFd;
@@ -43,7 +43,7 @@ pub trait AsRawFd {
 /// descriptor.
 #[stable(feature = "from_raw_os", since = "1.1.0")]
 pub trait FromRawFd {
-    /// Constructs a new instances of `Self` from the given raw file
+    /// Constructs a new instance of `Self` from the given raw file
     /// descriptor.
     ///
     /// This function **consumes ownership** of the specified file
@@ -73,6 +73,13 @@ pub trait IntoRawFd {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
+impl AsRawFd for RawFd {
+    fn as_raw_fd(&self) -> RawFd {
+        *self
+    }
+}
+
+#[stable(feature = "rust1", since = "1.0.0")]
 impl AsRawFd for fs::File {
     fn as_raw_fd(&self) -> RawFd {
         self.as_inner().fd().raw()
@@ -84,6 +91,14 @@ impl FromRawFd for fs::File {
         fs::File::from_inner(sys::fs::File::from_inner(fd))
     }
 }
+
+#[stable(feature = "into_raw_os", since = "1.4.0")]
+impl IntoRawFd for RawFd {
+    fn into_raw_fd(self) -> RawFd {
+        self
+    }
+}
+
 #[stable(feature = "into_raw_os", since = "1.4.0")]
 impl IntoRawFd for fs::File {
     fn into_raw_fd(self) -> RawFd {

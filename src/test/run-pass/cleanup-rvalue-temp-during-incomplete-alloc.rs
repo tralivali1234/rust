@@ -24,6 +24,7 @@
 // It's unclear how likely such a bug is to recur, but it seems like a
 // scenario worth testing.
 
+// ignore-emscripten no threads support
 
 #![allow(unknown_features)]
 #![feature(box_syntax)]
@@ -40,7 +41,7 @@ fn do_it(x: &[usize]) -> Foo {
     panic!()
 }
 
-fn get_bar(x: usize) -> Vec<usize> { vec!(x * 2) }
+fn get_bar(x: usize) -> Vec<usize> { vec![x * 2] }
 
 pub fn fails() {
     let x = 2;

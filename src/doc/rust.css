@@ -44,7 +44,9 @@
     font-family: 'Source Code Pro';
     font-style: normal;
     font-weight: 400;
-    src: local('Source Code Pro'), url("SourceCodePro-Regular.woff") format('woff');
+    /* Avoid using locally installed font because bad versions are in circulation:
+     * see https://github.com/rust-lang/rust/issues/24355 */
+    src: url("SourceCodePro-Regular.woff") format('woff');
 }
 
 *:not(body) {
@@ -159,7 +161,7 @@ em {
 
 footer {
     border-top: 1px solid #ddd;
-    font-size: 14.3px;
+    font-size: 14px;
     font-style: italic;
     padding-top: 5px;
     margin-top: 3em;
@@ -229,7 +231,7 @@ a > code {
 pre.rust .kw { color: #8959A8; }
 pre.rust .kw-2, pre.rust .prelude-ty { color: #4271AE; }
 pre.rust .number, pre.rust .string { color: #718C00; }
-pre.rust .self, pre.rust .boolval, pre.rust .prelude-val,
+pre.rust .self, pre.rust .bool-val, pre.rust .prelude-val,
 pre.rust .attribute, pre.rust .attribute .ident { color: #C82829; }
 pre.rust .comment { color: #8E908C; }
 pre.rust .doccomment { color: #4D4D4C; }
@@ -336,19 +338,21 @@ table th {
 
 /* Code snippets */
 
-.rusttest { display: none; }
 pre.rust { position: relative; }
 a.test-arrow {
+    background-color: rgba(78, 139, 202, 0.2);
     display: inline-block;
     position: absolute;
-
-    background-color: #4e8bca;
     color: #f5f5f5;
     padding: 5px 10px 5px 10px;
     border-radius: 5px;
     font-size: 130%;
     top: 5px;
     right: 5px;
+}
+a.test-arrow:hover{
+    background-color: #4e8bca;
+    text-decoration: none;
 }
 
 .unstable-feature {

@@ -31,17 +31,20 @@
 pub use self::Level::*;
 pub use self::LintSource::*;
 
+use hir;
+use hir::intravisit::FnKind;
 use std::hash;
 use std::ascii::AsciiExt;
-use syntax::codemap::Span;
-use rustc_front::intravisit::FnKind;
+use syntax_pos::Span;
 use syntax::visit as ast_visit;
 use syntax::ast;
-use rustc_front::hir;
+use syntax::symbol::Symbol;
 
 pub use lint::context::{LateContext, EarlyContext, LintContext, LintStore,
                         raw_emit_lint, check_crate, check_ast_crate, gather_attrs,
-                        GatherNodeLevels};
+                        raw_struct_lint, FutureIncompatibleInfo, EarlyLint, IntoEarlyLint};
+
+pub use lint::table::LintTable;
 
 /// Specification of a single lint.
 #[derive(Copy, Clone, Debug)]
@@ -129,68 +132,117 @@ pub trait LintPass {
 //
 // FIXME: eliminate the duplication with `Visitor`. But this also
 // contains a few lint-specific methods with no equivalent in `Visitor`.
-pub trait LateLintPass: LintPass {
+pub trait LateLintPass<'a, 'tcx>: LintPass {
+    fn check_body(&mut self, _: &LateContext, _: &'tcx hir::Body) { }
+    fn check_body_post(&mut self, _: &LateContext, _: &'tcx hir::Body) { }
     fn check_name(&mut self, _: &LateContext, _: Span, _: ast::Name) { }
-    fn check_crate(&mut self, _: &LateContext, _: &hir::Crate) { }
-    fn check_mod(&mut self, _: &LateContext, _: &hir::Mod, _: Span, _: ast::NodeId) { }
-    fn check_foreign_item(&mut self, _: &LateContext, _: &hir::ForeignItem) { }
-    fn check_item(&mut self, _: &LateContext, _: &hir::Item) { }
-    fn check_local(&mut self, _: &LateContext, _: &hir::Local) { }
-    fn check_block(&mut self, _: &LateContext, _: &hir::Block) { }
-    fn check_stmt(&mut self, _: &LateContext, _: &hir::Stmt) { }
-    fn check_arm(&mut self, _: &LateContext, _: &hir::Arm) { }
-    fn check_pat(&mut self, _: &LateContext, _: &hir::Pat) { }
-    fn check_decl(&mut self, _: &LateContext, _: &hir::Decl) { }
-    fn check_expr(&mut self, _: &LateContext, _: &hir::Expr) { }
-    fn check_expr_post(&mut self, _: &LateContext, _: &hir::Expr) { }
-    fn check_ty(&mut self, _: &LateContext, _: &hir::Ty) { }
-    fn check_generics(&mut self, _: &LateContext, _: &hir::Generics) { }
-    fn check_fn(&mut self, _: &LateContext,
-        _: FnKind, _: &hir::FnDecl, _: &hir::Block, _: Span, _: ast::NodeId) { }
-    fn check_trait_item(&mut self, _: &LateContext, _: &hir::TraitItem) { }
-    fn check_impl_item(&mut self, _: &LateContext, _: &hir::ImplItem) { }
-    fn check_struct_def(&mut self, _: &LateContext,
-        _: &hir::VariantData, _: ast::Name, _: &hir::Generics, _: ast::NodeId) { }
-    fn check_struct_def_post(&mut self, _: &LateContext,
-        _: &hir::VariantData, _: ast::Name, _: &hir::Generics, _: ast::NodeId) { }
-    fn check_struct_field(&mut self, _: &LateContext, _: &hir::StructField) { }
-    fn check_variant(&mut self, _: &LateContext, _: &hir::Variant, _: &hir::Generics) { }
-    fn check_variant_post(&mut self, _: &LateContext, _: &hir::Variant, _: &hir::Generics) { }
-    fn check_lifetime(&mut self, _: &LateContext, _: &hir::Lifetime) { }
-    fn check_lifetime_def(&mut self, _: &LateContext, _: &hir::LifetimeDef) { }
-    fn check_explicit_self(&mut self, _: &LateContext, _: &hir::ExplicitSelf) { }
-    fn check_path(&mut self, _: &LateContext, _: &hir::Path, _: ast::NodeId) { }
-    fn check_path_list_item(&mut self, _: &LateContext, _: &hir::PathListItem) { }
-    fn check_attribute(&mut self, _: &LateContext, _: &ast::Attribute) { }
+    fn check_crate(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Crate) { }
+    fn check_crate_post(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Crate) { }
+    fn check_mod(&mut self,
+                 _: &LateContext<'a, 'tcx>,
+                 _: &'tcx hir::Mod,
+                 _: Span,
+                 _: ast::NodeId) { }
+    fn check_mod_post(&mut self,
+                      _: &LateContext<'a, 'tcx>,
+                      _: &'tcx hir::Mod,
+                      _: Span,
+                      _: ast::NodeId) { }
+    fn check_foreign_item(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::ForeignItem) { }
+    fn check_foreign_item_post(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::ForeignItem) { }
+    fn check_item(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Item) { }
+    fn check_item_post(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Item) { }
+    fn check_local(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Local) { }
+    fn check_block(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Block) { }
+    fn check_block_post(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Block) { }
+    fn check_stmt(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Stmt) { }
+    fn check_arm(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Arm) { }
+    fn check_pat(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Pat) { }
+    fn check_decl(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Decl) { }
+    fn check_expr(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Expr) { }
+    fn check_expr_post(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Expr) { }
+    fn check_ty(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Ty) { }
+    fn check_generics(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Generics) { }
+    fn check_fn(&mut self,
+                _: &LateContext<'a, 'tcx>,
+                _: FnKind<'tcx>,
+                _: &'tcx hir::FnDecl,
+                _: &'tcx hir::Body,
+                _: Span,
+                _: ast::NodeId) { }
+    fn check_fn_post(&mut self,
+                     _: &LateContext<'a, 'tcx>,
+                     _: FnKind<'tcx>,
+                     _: &'tcx hir::FnDecl,
+                     _: &'tcx hir::Body,
+                     _: Span,
+                     _: ast::NodeId) { }
+    fn check_trait_item(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::TraitItem) { }
+    fn check_trait_item_post(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::TraitItem) { }
+    fn check_impl_item(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::ImplItem) { }
+    fn check_impl_item_post(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::ImplItem) { }
+    fn check_struct_def(&mut self,
+                        _: &LateContext<'a, 'tcx>,
+                        _: &'tcx hir::VariantData,
+                        _: ast::Name,
+                        _: &'tcx hir::Generics,
+                        _: ast::NodeId) { }
+    fn check_struct_def_post(&mut self,
+                             _: &LateContext<'a, 'tcx>,
+                             _: &'tcx hir::VariantData,
+                             _: ast::Name,
+                             _: &'tcx hir::Generics,
+                             _: ast::NodeId) { }
+    fn check_struct_field(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::StructField) { }
+    fn check_variant(&mut self,
+                     _: &LateContext<'a, 'tcx>,
+                     _: &'tcx hir::Variant,
+                     _: &'tcx hir::Generics) { }
+    fn check_variant_post(&mut self,
+                          _: &LateContext<'a, 'tcx>,
+                          _: &'tcx hir::Variant,
+                          _: &'tcx hir::Generics) { }
+    fn check_lifetime(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Lifetime) { }
+    fn check_lifetime_def(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::LifetimeDef) { }
+    fn check_path(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx hir::Path, _: ast::NodeId) { }
+    fn check_attribute(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx ast::Attribute) { }
 
     /// Called when entering a syntax node that can have lint attributes such
     /// as `#[allow(...)]`. Called with *all* the attributes of that node.
-    fn enter_lint_attrs(&mut self, _: &LateContext, _: &[ast::Attribute]) { }
+    fn enter_lint_attrs(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx [ast::Attribute]) { }
 
     /// Counterpart to `enter_lint_attrs`.
-    fn exit_lint_attrs(&mut self, _: &LateContext, _: &[ast::Attribute]) { }
+    fn exit_lint_attrs(&mut self, _: &LateContext<'a, 'tcx>, _: &'tcx [ast::Attribute]) { }
 }
 
 pub trait EarlyLintPass: LintPass {
     fn check_ident(&mut self, _: &EarlyContext, _: Span, _: ast::Ident) { }
     fn check_crate(&mut self, _: &EarlyContext, _: &ast::Crate) { }
+    fn check_crate_post(&mut self, _: &EarlyContext, _: &ast::Crate) { }
     fn check_mod(&mut self, _: &EarlyContext, _: &ast::Mod, _: Span, _: ast::NodeId) { }
+    fn check_mod_post(&mut self, _: &EarlyContext, _: &ast::Mod, _: Span, _: ast::NodeId) { }
     fn check_foreign_item(&mut self, _: &EarlyContext, _: &ast::ForeignItem) { }
+    fn check_foreign_item_post(&mut self, _: &EarlyContext, _: &ast::ForeignItem) { }
     fn check_item(&mut self, _: &EarlyContext, _: &ast::Item) { }
+    fn check_item_post(&mut self, _: &EarlyContext, _: &ast::Item) { }
     fn check_local(&mut self, _: &EarlyContext, _: &ast::Local) { }
     fn check_block(&mut self, _: &EarlyContext, _: &ast::Block) { }
+    fn check_block_post(&mut self, _: &EarlyContext, _: &ast::Block) { }
     fn check_stmt(&mut self, _: &EarlyContext, _: &ast::Stmt) { }
     fn check_arm(&mut self, _: &EarlyContext, _: &ast::Arm) { }
     fn check_pat(&mut self, _: &EarlyContext, _: &ast::Pat) { }
-    fn check_decl(&mut self, _: &EarlyContext, _: &ast::Decl) { }
     fn check_expr(&mut self, _: &EarlyContext, _: &ast::Expr) { }
     fn check_expr_post(&mut self, _: &EarlyContext, _: &ast::Expr) { }
     fn check_ty(&mut self, _: &EarlyContext, _: &ast::Ty) { }
     fn check_generics(&mut self, _: &EarlyContext, _: &ast::Generics) { }
     fn check_fn(&mut self, _: &EarlyContext,
-        _: ast_visit::FnKind, _: &ast::FnDecl, _: &ast::Block, _: Span, _: ast::NodeId) { }
+        _: ast_visit::FnKind, _: &ast::FnDecl, _: Span, _: ast::NodeId) { }
+    fn check_fn_post(&mut self, _: &EarlyContext,
+        _: ast_visit::FnKind, _: &ast::FnDecl, _: Span, _: ast::NodeId) { }
     fn check_trait_item(&mut self, _: &EarlyContext, _: &ast::TraitItem) { }
+    fn check_trait_item_post(&mut self, _: &EarlyContext, _: &ast::TraitItem) { }
     fn check_impl_item(&mut self, _: &EarlyContext, _: &ast::ImplItem) { }
+    fn check_impl_item_post(&mut self, _: &EarlyContext, _: &ast::ImplItem) { }
     fn check_struct_def(&mut self, _: &EarlyContext,
         _: &ast::VariantData, _: ast::Ident, _: &ast::Generics, _: ast::NodeId) { }
     fn check_struct_def_post(&mut self, _: &EarlyContext,
@@ -200,7 +252,6 @@ pub trait EarlyLintPass: LintPass {
     fn check_variant_post(&mut self, _: &EarlyContext, _: &ast::Variant, _: &ast::Generics) { }
     fn check_lifetime(&mut self, _: &EarlyContext, _: &ast::Lifetime) { }
     fn check_lifetime_def(&mut self, _: &EarlyContext, _: &ast::LifetimeDef) { }
-    fn check_explicit_self(&mut self, _: &EarlyContext, _: &ast::ExplicitSelf) { }
     fn check_path(&mut self, _: &EarlyContext, _: &ast::Path, _: ast::NodeId) { }
     fn check_path_list_item(&mut self, _: &EarlyContext, _: &ast::PathListItem) { }
     fn check_attribute(&mut self, _: &EarlyContext, _: &ast::Attribute) { }
@@ -215,7 +266,7 @@ pub trait EarlyLintPass: LintPass {
 
 /// A lint pass boxed up as a trait object.
 pub type EarlyLintPassObject = Box<EarlyLintPass + 'static>;
-pub type LateLintPassObject = Box<LateLintPass + 'static>;
+pub type LateLintPassObject = Box<for<'a, 'tcx> LateLintPass<'a, 'tcx> + 'static>;
 
 /// Identifies a lint known to the compiler.
 #[derive(Clone, Copy, Debug)]
@@ -248,13 +299,13 @@ impl LintId {
     }
 
     /// Get the name of the lint.
-    pub fn as_str(&self) -> String {
+    pub fn to_string(&self) -> String {
         self.lint.name_lower()
     }
 }
 
 /// Setting for how to handle a lint.
-#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Debug, Hash)]
 pub enum Level {
     Allow, Warn, Deny, Forbid
 }
@@ -290,14 +341,14 @@ pub enum LintSource {
     Default,
 
     /// Lint level was set by an attribute.
-    Node(Span),
+    Node(ast::Name, Span),
 
     /// Lint level was set by a command-line flag.
-    CommandLine,
+    CommandLine(Symbol),
 }
 
 pub type LevelSource = (Level, LintSource);
 
 pub mod builtin;
-
 mod context;
+mod table;

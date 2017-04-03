@@ -8,11 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-msvc everything is the system allocator on msvc
-// ignore-musl no dylibs on musl yet
-// ignore-bitrig no jemalloc on bitrig
-// ignore-openbsd no jemalloc on openbsd
+// ignore-musl no dylibs
 // aux-build:allocator-dylib.rs
+// aux-build:allocator1.rs
 // no-prefer-dynamic
 // error-pattern: cannot link together two allocators
 
@@ -20,10 +18,23 @@
 // system allocator. Do this by linking in jemalloc and making sure that we get
 // an error.
 
+// ignore-emscripten FIXME: What "other allocator" should we use for emcc?
+
 #![feature(alloc_jemalloc)]
 
 extern crate allocator_dylib;
+
+// The main purpose of this test is to ensure that `alloc_jemalloc` **fails**
+// here (specifically the jemalloc allocator), but currently jemalloc is
+// disabled on quite a few platforms (bsds, emscripten, msvc, etc). To ensure
+// that this just passes on those platforms we link in some other allocator to
+// ensure we get the same error.
+//
+// So long as we CI linux/macOS we should be good.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 extern crate alloc_jemalloc;
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+extern crate allocator1;
 
 fn main() {
     allocator_dylib::foo();

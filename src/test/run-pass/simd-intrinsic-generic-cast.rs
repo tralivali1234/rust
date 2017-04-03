@@ -7,9 +7,9 @@
 // <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
+// ignore-emscripten linking with emcc failed
 
-#![feature(repr_simd, platform_intrinsics, concat_idents,
-           type_macros, test)]
+#![feature(repr_simd, platform_intrinsics, concat_idents, test)]
 #![allow(non_camel_case_types)]
 
 extern crate test;
@@ -94,7 +94,7 @@ fn main() {
             // (E.g. negative float to unsigned integer goes through a
             // library routine on the default i686 platforms, and the
             // implementation of that routine differs on e.g. Linux
-            // vs. OSX, resulting in different answers.)
+            // vs. macOS, resulting in different answers.)
             if $from::is_float() {
                 if !$to::in_range(A) { from.0 = 0 as $to; to.0 = 0 as $to; }
                 if !$to::in_range(B) { from.1 = 0 as $to; to.1 = 0 as $to; }

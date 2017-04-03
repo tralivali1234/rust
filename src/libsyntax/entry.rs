@@ -9,7 +9,7 @@
 // except according to those terms.
 
 use attr;
-use ast::{Item, ItemFn};
+use ast::{Item, ItemKind};
 
 pub enum EntryPointType {
     None,
@@ -23,12 +23,12 @@ pub enum EntryPointType {
 // them in sync.
 pub fn entry_point_type(item: &Item, depth: usize) -> EntryPointType {
     match item.node {
-        ItemFn(..) => {
+        ItemKind::Fn(..) => {
             if attr::contains_name(&item.attrs, "start") {
                 EntryPointType::Start
             } else if attr::contains_name(&item.attrs, "main") {
                 EntryPointType::MainAttr
-            } else if item.ident.name.as_str() == "main" {
+            } else if item.ident.name == "main" {
                 if depth == 1 {
                     // This is a top-level function so can be 'main'
                     EntryPointType::MainNamed

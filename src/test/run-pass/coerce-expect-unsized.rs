@@ -8,8 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// pretty-expanded FIXME #23616
-
 #![allow(unknown_features)]
 #![feature(box_syntax)]
 
@@ -21,15 +19,6 @@ use std::rc::Rc;
 // rvalue expressions to be unsized. See #20169 for more information.
 
 pub fn main() {
-    // FIXME #22405: We cannot infer the type `Box<[isize; k]>` for
-    // the r-value expression from the context `Box<[isize]>`, and
-    // therefore the `box EXPR` desugaring breaks down.
-    //
-    // One could reasonably claim that the `box EXPR` desugaring is
-    // effectively regressing half of Issue #20169. Hopefully we will
-    // eventually fix that, at which point the `Box::new` calls below
-    // should be replaced wth uses of `box`.
-
     let _: Box<[isize]> = Box::new({ [1, 2, 3] });
     let _: Box<[isize]> = Box::new(if true { [1, 2, 3] } else { [1, 3, 4] });
     let _: Box<[isize]> = Box::new(match true { true => [1, 2, 3], false => [1, 3, 4] });
@@ -43,6 +32,13 @@ pub fn main() {
     let _: &Fn(isize) -> _ = &{ |x| (x as u8) };
     let _: &Debug = &if true { false } else { true };
     let _: &Debug = &match true { true => 'a', false => 'b' };
+
+    let _: &str = &{ String::new() };
+    let _: &str = &if true { String::from("...") } else { 5.to_string() };
+    let _: &str = &match true {
+        true => format!("{}", false),
+        false => ["x", "y"].join("+")
+    };
 
     let _: Box<[isize]> = Box::new([1, 2, 3]);
     let _: Box<Fn(isize) -> _> = Box::new(|x| (x as u8));

@@ -8,47 +8,36 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(as_unsafe_cell)]
-#![feature(borrow_state)]
+#![deny(warnings)]
+
 #![feature(box_syntax)]
-#![feature(cell_extras)]
+#![feature(char_escape_debug)]
 #![feature(const_fn)]
-#![feature(core)]
-#![feature(core_float)]
 #![feature(core_private_bignum)]
 #![feature(core_private_diy_float)]
 #![feature(dec2flt)]
-#![feature(decode_utf16)]
+#![feature(decode_utf8)]
 #![feature(fixed_size_array)]
-#![feature(float_extras)]
-#![feature(float_from_str_radix)]
 #![feature(flt2dec)]
-#![feature(fmt_radix)]
-#![feature(iter_arith)]
-#![feature(iter_arith)]
-#![feature(iter_cmp)]
-#![feature(iter_order)]
+#![feature(fmt_internals)]
 #![feature(libc)]
 #![feature(nonzero)]
-#![feature(num_bits_bytes)]
-#![feature(peekable_is_empty)]
-#![feature(ptr_as_ref)]
 #![feature(rand)]
-#![feature(range_inclusive)]
 #![feature(raw)]
-#![feature(slice_bytes)]
+#![feature(sip_hash_13)]
 #![feature(slice_patterns)]
+#![feature(sort_internals)]
+#![feature(sort_unstable)]
 #![feature(step_by)]
 #![feature(test)]
-#![feature(unboxed_closures)]
+#![feature(try_from)]
 #![feature(unicode)]
 #![feature(unique)]
-#![feature(clone_from_slice)]
 
 extern crate core;
 extern crate test;
 extern crate libc;
-extern crate rustc_unicode;
+extern crate std_unicode;
 extern crate rand;
 
 mod any;

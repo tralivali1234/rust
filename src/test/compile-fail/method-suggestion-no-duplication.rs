@@ -9,6 +9,7 @@
 // except according to those terms.
 
 // issue #21405
+// ignore-tidy-linelength
 
 struct Foo;
 
@@ -17,6 +18,8 @@ fn foo<F>(f: F) where F: FnMut(Foo) {}
 fn main() {
     foo(|s| s.is_empty());
     //~^ ERROR no method named `is_empty` found
-    //~^^ HELP #1: `core::slice::SliceExt`
-    //~^^^ HELP #2: `core::str::StrExt`
+    //~^^ HELP #1: `std::iter::ExactSizeIterator`
+    //~^^^ HELP #2: `core::slice::SliceExt`
+    //~^^^^ HELP #3: `core::str::StrExt`
+    //~^^^^^ HELP items from traits can only be used if the trait is implemented and in scope; the following traits define an item `is_empty`, perhaps you need to implement one of them:
 }

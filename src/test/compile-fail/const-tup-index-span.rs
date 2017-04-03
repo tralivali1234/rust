@@ -10,8 +10,9 @@
 
 // Test spans of errors
 
-const TUP: (usize,) = 5 << 64;
-//~^ ERROR: attempted left shift with overflow [E0250]
+const TUP: (usize,) = 5usize << 64;
+//~^ ERROR mismatched types
+//~| expected tuple, found usize
 const ARR: [i32; TUP.0] = [];
 
 fn main() {

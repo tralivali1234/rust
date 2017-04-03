@@ -34,38 +34,38 @@ fn main() {
     1u32.method();
     //~^ HELP following traits are implemented but not in scope, perhaps add a `use` for one of them
     //~^^ ERROR no method named
-    //~^^^ HELP `foo::Bar`
-    //~^^^^ HELP `no_method_suggested_traits::foo::PubPub`
+    //~^^^ HELP `use foo::Bar;`
+    //~^^^^ HELP `use no_method_suggested_traits::foo::PubPub;`
     std::rc::Rc::new(&mut Box::new(&1u32)).method();
     //~^ HELP following traits are implemented but not in scope, perhaps add a `use` for one of them
     //~^^ ERROR no method named
-    //~^^^ HELP `foo::Bar`
-    //~^^^^ HELP `no_method_suggested_traits::foo::PubPub`
+    //~^^^ HELP `use foo::Bar;`
+    //~^^^^ HELP `use no_method_suggested_traits::foo::PubPub;`
 
     'a'.method();
     //~^ ERROR no method named
     //~^^ HELP the following trait is implemented but not in scope, perhaps add a `use` for it:
-    //~^^^ HELP `foo::Bar`
+    //~^^^ HELP `use foo::Bar;`
     std::rc::Rc::new(&mut Box::new(&'a')).method();
     //~^ ERROR no method named
     //~^^ HELP the following trait is implemented but not in scope, perhaps add a `use` for it:
-    //~^^^ HELP `foo::Bar`
+    //~^^^ HELP `use foo::Bar;`
 
     1i32.method();
     //~^ ERROR no method named
     //~^^ HELP the following trait is implemented but not in scope, perhaps add a `use` for it:
-    //~^^^ HELP `no_method_suggested_traits::foo::PubPub`
+    //~^^^ HELP `use no_method_suggested_traits::foo::PubPub;`
     std::rc::Rc::new(&mut Box::new(&1i32)).method();
     //~^ ERROR no method named
     //~^^ HELP the following trait is implemented but not in scope, perhaps add a `use` for it:
-    //~^^^ HELP `no_method_suggested_traits::foo::PubPub`
+    //~^^^ HELP `use no_method_suggested_traits::foo::PubPub;`
 
     Foo.method();
     //~^ ERROR no method named
     //~^^ HELP following traits define an item `method`, perhaps you need to implement one of them
     //~^^^ HELP `foo::Bar`
     //~^^^^ HELP `no_method_suggested_traits::foo::PubPub`
-    //~^^^^^ HELP `no_method_suggested_traits::reexport::Reexported`
+    //~^^^^^ HELP `no_method_suggested_traits::Reexported`
     //~^^^^^^ HELP `no_method_suggested_traits::bar::PubPriv`
     //~^^^^^^^ HELP `no_method_suggested_traits::qux::PrivPub`
     //~^^^^^^^^ HELP `no_method_suggested_traits::quz::PrivPriv`
@@ -74,7 +74,7 @@ fn main() {
     //~^^ HELP following traits define an item `method`, perhaps you need to implement one of them
     //~^^^ HELP `foo::Bar`
     //~^^^^ HELP `no_method_suggested_traits::foo::PubPub`
-    //~^^^^^ HELP `no_method_suggested_traits::reexport::Reexported`
+    //~^^^^^ HELP `no_method_suggested_traits::Reexported`
     //~^^^^^^ HELP `no_method_suggested_traits::bar::PubPriv`
     //~^^^^^^^ HELP `no_method_suggested_traits::qux::PrivPub`
     //~^^^^^^^^ HELP `no_method_suggested_traits::quz::PrivPriv`

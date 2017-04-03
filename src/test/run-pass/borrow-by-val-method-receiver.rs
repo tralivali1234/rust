@@ -8,9 +8,6 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-
-// pretty-expanded FIXME #23616
-
 trait Foo {
     fn foo(self);
 }
@@ -20,6 +17,6 @@ impl<'a> Foo for &'a [isize] {
 }
 
 pub fn main() {
-    let items = vec!( 3, 5, 1, 2, 4 );
+    let items = vec![ 3, 5, 1, 2, 4 ];
     items.foo();
 }

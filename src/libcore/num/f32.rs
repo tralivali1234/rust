@@ -20,155 +20,169 @@ use mem;
 use num::Float;
 use num::FpCategory as Fp;
 
+/// The radix or base of the internal representation of `f32`.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
 pub const RADIX: u32 = 2;
 
+/// Number of significant digits in base 2.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
 pub const MANTISSA_DIGITS: u32 = 24;
+/// Approximate number of significant digits in base 10.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
 pub const DIGITS: u32 = 6;
 
+/// Difference between `1.0` and the next largest representable number.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
 pub const EPSILON: f32 = 1.19209290e-07_f32;
 
-/// Smallest finite f32 value
+/// Smallest finite `f32` value.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub const MIN: f32 = -3.40282347e+38_f32;
-/// Smallest positive, normalized f32 value
+/// Smallest positive normal `f32` value.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub const MIN_POSITIVE: f32 = 1.17549435e-38_f32;
-/// Largest finite f32 value
+/// Largest finite `f32` value.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub const MAX: f32 = 3.40282347e+38_f32;
 
+/// One greater than the minimum possible normal power of 2 exponent.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
 pub const MIN_EXP: i32 = -125;
+/// Maximum possible power of 2 exponent.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
 pub const MAX_EXP: i32 = 128;
 
+/// Minimum possible normal power of 10 exponent.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
 pub const MIN_10_EXP: i32 = -37;
+/// Maximum possible power of 10 exponent.
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
 pub const MAX_10_EXP: i32 = 38;
 
+/// Not a Number (NaN).
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
-pub const NAN: f32 = 0.0_f32/0.0_f32;
+pub const NAN: f32 = 0.0_f32 / 0.0_f32;
+/// Infinity (∞).
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
-pub const INFINITY: f32 = 1.0_f32/0.0_f32;
+pub const INFINITY: f32 = 1.0_f32 / 0.0_f32;
+/// Negative infinity (-∞).
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(missing_docs)]
-pub const NEG_INFINITY: f32 = -1.0_f32/0.0_f32;
+pub const NEG_INFINITY: f32 = -1.0_f32 / 0.0_f32;
 
 /// Basic mathematical constants.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub mod consts {
     // FIXME: replace with mathematical constants from cmath.
 
-    /// Archimedes' constant
+    /// Archimedes' constant (π)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const PI: f32 = 3.14159265358979323846264338327950288_f32;
 
-    /// pi/2.0
+    /// π/2
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_PI_2: f32 = 1.57079632679489661923132169163975144_f32;
 
-    /// pi/3.0
+    /// π/3
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_PI_3: f32 = 1.04719755119659774615421446109316763_f32;
 
-    /// pi/4.0
+    /// π/4
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_PI_4: f32 = 0.785398163397448309615660845819875721_f32;
 
-    /// pi/6.0
+    /// π/6
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_PI_6: f32 = 0.52359877559829887307710723054658381_f32;
 
-    /// pi/8.0
+    /// π/8
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_PI_8: f32 = 0.39269908169872415480783042290993786_f32;
 
-    /// 1.0/pi
+    /// 1/π
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_1_PI: f32 = 0.318309886183790671537767526745028724_f32;
 
-    /// 2.0/pi
+    /// 2/π
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_2_PI: f32 = 0.636619772367581343075535053490057448_f32;
 
-    /// 2.0/sqrt(pi)
+    /// 2/sqrt(π)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_2_SQRT_PI: f32 = 1.12837916709551257389615890312154517_f32;
 
-    /// sqrt(2.0)
+    /// sqrt(2)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const SQRT_2: f32 = 1.41421356237309504880168872420969808_f32;
 
-    /// 1.0/sqrt(2.0)
+    /// 1/sqrt(2)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const FRAC_1_SQRT_2: f32 = 0.707106781186547524400844362104849039_f32;
 
-    /// Euler's number
+    /// Euler's number (e)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const E: f32 = 2.71828182845904523536028747135266250_f32;
 
-    /// log2(e)
+    /// log<sub>2</sub>(e)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const LOG2_E: f32 = 1.44269504088896340735992468100189214_f32;
 
-    /// log10(e)
+    /// log<sub>10</sub>(e)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const LOG10_E: f32 = 0.434294481903251827651128918916605082_f32;
 
-    /// ln(2.0)
+    /// ln(2)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const LN_2: f32 = 0.693147180559945309417232121458176568_f32;
 
-    /// ln(10.0)
+    /// ln(10)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const LN_10: f32 = 2.30258509299404568401799145468436421_f32;
 }
 
 #[unstable(feature = "core_float",
            reason = "stable interface is via `impl f{32,64}` in later crates",
-           issue = "27702")]
+           issue = "32110")]
 impl Float for f32 {
     #[inline]
-    fn nan() -> f32 { NAN }
+    fn nan() -> f32 {
+        NAN
+    }
 
     #[inline]
-    fn infinity() -> f32 { INFINITY }
+    fn infinity() -> f32 {
+        INFINITY
+    }
 
     #[inline]
-    fn neg_infinity() -> f32 { NEG_INFINITY }
+    fn neg_infinity() -> f32 {
+        NEG_INFINITY
+    }
 
     #[inline]
-    fn zero() -> f32 { 0.0 }
+    fn zero() -> f32 {
+        0.0
+    }
 
     #[inline]
-    fn neg_zero() -> f32 { -0.0 }
+    fn neg_zero() -> f32 {
+        -0.0
+    }
 
     #[inline]
-    fn one() -> f32 { 1.0 }
+    fn one() -> f32 {
+        1.0
+    }
 
     /// Returns `true` if the number is NaN.
     #[inline]
-    fn is_nan(self) -> bool { self != self }
+    fn is_nan(self) -> bool {
+        self != self
+    }
 
     /// Returns `true` if the number is infinite.
     #[inline]
     fn is_infinite(self) -> bool {
-        self == Float::infinity() || self == Float::neg_infinity()
+        self == INFINITY || self == NEG_INFINITY
     }
 
     /// Returns `true` if the number is neither infinite or NaN.
@@ -192,11 +206,11 @@ impl Float for f32 {
 
         let bits: u32 = unsafe { mem::transmute(self) };
         match (bits & MAN_MASK, bits & EXP_MASK) {
-            (0, 0)        => Fp::Zero,
-            (_, 0)        => Fp::Subnormal,
+            (0, 0) => Fp::Zero,
+            (_, 0) => Fp::Subnormal,
             (0, EXP_MASK) => Fp::Infinite,
             (_, EXP_MASK) => Fp::Nan,
-            _             => Fp::Normal,
+            _ => Fp::Normal,
         }
     }
 
@@ -230,7 +244,7 @@ impl Float for f32 {
     #[inline]
     fn signum(self) -> f32 {
         if self.is_nan() {
-            Float::nan()
+            NAN
         } else {
             unsafe { intrinsics::copysignf32(1.0, self) }
         }
@@ -240,19 +254,21 @@ impl Float for f32 {
     /// `Float::infinity()`.
     #[inline]
     fn is_sign_positive(self) -> bool {
-        self > 0.0 || (1.0 / self) == Float::infinity()
+        self > 0.0 || (1.0 / self) == INFINITY
     }
 
     /// Returns `true` if `self` is negative, including `-0.0` and
     /// `Float::neg_infinity()`.
     #[inline]
     fn is_sign_negative(self) -> bool {
-        self < 0.0 || (1.0 / self) == Float::neg_infinity()
+        self < 0.0 || (1.0 / self) == NEG_INFINITY
     }
 
     /// Returns the reciprocal (multiplicative inverse) of the number.
     #[inline]
-    fn recip(self) -> f32 { 1.0 / self }
+    fn recip(self) -> f32 {
+        1.0 / self
+    }
 
     #[inline]
     fn powi(self, n: i32) -> f32 {
@@ -261,7 +277,9 @@ impl Float for f32 {
 
     /// Converts to degrees, assuming the number is in radians.
     #[inline]
-    fn to_degrees(self) -> f32 { self * (180.0f32 / consts::PI) }
+    fn to_degrees(self) -> f32 {
+        self * (180.0f32 / consts::PI)
+    }
 
     /// Converts to radians, assuming the number is in degrees.
     #[inline]

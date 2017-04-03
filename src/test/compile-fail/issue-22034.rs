@@ -8,13 +8,15 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![feature(libc)]
+
 extern crate libc;
 
 fn main() {
     let ptr: *mut () = 0 as *mut _;
     let _: &mut Fn() = unsafe {
         &mut *(ptr as *mut Fn())
-        //~^ ERROR the trait `core::ops::Fn<()>` is not implemented
-        //~| ERROR the trait `core::ops::FnOnce<()>` is not implemented
+        //~^ ERROR `(): std::ops::Fn<()>` is not satisfied
+        //~| ERROR `(): std::ops::FnOnce<()>` is not satisfied
     };
 }

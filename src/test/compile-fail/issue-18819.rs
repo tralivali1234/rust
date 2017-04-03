@@ -19,9 +19,12 @@ impl Foo for X {
 }
 
 fn print_x(_: &Foo<Item=bool>, extra: &str) {
+    //~^ NOTE defined here
     println!("{}", extra);
 }
 
 fn main() {
-    print_x(X);  //~error this function takes 2 parameters but 1 parameter was supplied
+    print_x(X);
+    //~^ ERROR E0061
+    //~| NOTE expected 2 parameters
 }

@@ -11,7 +11,7 @@
 //! Simplification of where clauses and parameter bounds into a prettier and
 //! more canonical form.
 //!
-//! Currently all cross-crate-inlined function use `middle::ty` to reconstruct
+//! Currently all cross-crate-inlined function use `rustc::ty` to reconstruct
 //! the AST (e.g. see all of `clean::inline`), but this is not always a
 //! non-lossy transformation. The current format of storage for where clauses
 //! for functions and such is simply a list of predicates. One example of this
@@ -27,19 +27,19 @@
 //! bounds by special casing scenarios such as these. Fun!
 
 use std::mem;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
-use rustc::middle::def_id::DefId;
-use rustc::middle::subst;
+use rustc::hir::def_id::DefId;
+use rustc::ty;
 
 use clean::PathParameters as PP;
 use clean::WherePredicate as WP;
-use clean::{self, Clean};
+use clean;
 use core::DocContext;
 
 pub fn where_clauses(cx: &DocContext, clauses: Vec<WP>) -> Vec<WP> {
     // First, partition the where clause into its separate components
-    let mut params = HashMap::new();
+    let mut params = BTreeMap::new();
     let mut lifetimes = Vec::new();
     let mut equalities = Vec::new();
     let mut tybounds = Vec::new();
@@ -62,7 +62,7 @@ pub fn where_clauses(cx: &DocContext, clauses: Vec<WP>) -> Vec<WP> {
     // Simplify the type parameter bounds on all the generics
     let mut params = params.into_iter().map(|(k, v)| {
         (k, ty_bounds(v))
-    }).collect::<HashMap<_, _>>();
+    }).collect::<BTreeMap<_, _>>();
 
     // Look for equality predicates on associated types that can be merged into
     // general bound predicates
@@ -141,7 +141,7 @@ pub fn ty_params(mut params: Vec<clean::TyParam>) -> Vec<clean::TyParam> {
     for param in &mut params {
         param.bounds = ty_bounds(mem::replace(&mut param.bounds, Vec::new()));
     }
-    return params;
+    params
 }
 
 fn ty_bounds(bounds: Vec<clean::TyParamBound>) -> Vec<clean::TyParamBound> {
@@ -153,27 +153,16 @@ fn trait_is_same_or_supertrait(cx: &DocContext, child: DefId,
     if child == trait_ {
         return true
     }
-    let def = cx.tcx().lookup_trait_def(child);
-    let predicates = cx.tcx().lookup_predicates(child);
-    let generics = (&def.generics, &predicates, subst::TypeSpace).clean(cx);
-    generics.where_predicates.iter().filter_map(|pred| {
-        match *pred {
-            clean::WherePredicate::BoundPredicate {
-                ty: clean::Generic(ref s),
-                ref bounds
-            } if *s == "Self" => Some(bounds),
-            _ => None,
-        }
-    }).flat_map(|bounds| bounds).any(|bound| {
-        let poly_trait = match *bound {
-            clean::TraitBound(ref t, _) => t,
-            _ => return false,
-        };
-        match poly_trait.trait_ {
-            clean::ResolvedPath { did, .. } => {
-                trait_is_same_or_supertrait(cx, did, trait_)
+    let predicates = cx.tcx.item_super_predicates(child).predicates;
+    predicates.iter().filter_map(|pred| {
+        if let ty::Predicate::Trait(ref pred) = *pred {
+            if pred.0.trait_ref.self_ty().is_self() {
+                Some(pred.def_id())
+            } else {
+                None
             }
-            _ => false,
+        } else {
+            None
         }
-    })
+    }).any(|did| trait_is_same_or_supertrait(cx, did, trait_))
 }

@@ -34,7 +34,8 @@ where T : Convert<U>
 
 fn a() {
     test(22, std::default::Default::default());
-    //~^ ERROR type annotations or generic parameter binding required
+    //~^ ERROR type annotations needed [E0282]
+    //~| NOTE cannot infer type for `U`
 }
 
 fn main() {}

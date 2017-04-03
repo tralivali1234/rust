@@ -12,15 +12,15 @@
 
 use session::config;
 use session::Session;
-use middle::cstore::CrateStore;
 use middle::lang_items;
 
+use rustc_back::PanicStrategy;
 use syntax::ast;
-use syntax::codemap::Span;
-use syntax::parse::token::InternedString;
-use rustc_front::intravisit::Visitor;
-use rustc_front::intravisit;
-use rustc_front::hir;
+use syntax::symbol::Symbol;
+use syntax_pos::Span;
+use hir::intravisit::{Visitor, NestedVisitorMap};
+use hir::intravisit;
+use hir;
 
 use std::collections::HashSet;
 
@@ -50,15 +50,15 @@ pub fn check_crate(krate: &hir::Crate,
 
     {
         let mut cx = Context { sess: sess, items: items };
-        krate.visit_all_items(&mut cx);
+        krate.visit_all_item_likes(&mut cx.as_deep_visitor());
     }
     verify(sess, items);
 }
 
-pub fn link_name(attrs: &[ast::Attribute]) -> Option<InternedString> {
+pub fn link_name(attrs: &[ast::Attribute]) -> Option<Symbol> {
     lang_items::extract(attrs).and_then(|name| {
-        $(if &name[..] == stringify!($name) {
-            Some(InternedString::new(stringify!($sym)))
+        $(if name == stringify!($name) {
+            Some(Symbol::intern(stringify!($sym)))
         } else)* {
             None
         }
@@ -71,12 +71,16 @@ fn verify(sess: &Session, items: &lang_items::LanguageItems) {
     let needs_check = sess.crate_types.borrow().iter().any(|kind| {
         match *kind {
             config::CrateTypeDylib |
+            config::CrateTypeProcMacro |
+            config::CrateTypeCdylib |
             config::CrateTypeExecutable |
             config::CrateTypeStaticlib => true,
             config::CrateTypeRlib => false,
         }
     });
-    if !needs_check { return }
+    if !needs_check {
+        return
+    }
 
     let mut missing = HashSet::new();
     for cnum in sess.cstore.crates() {
@@ -85,8 +89,19 @@ fn verify(sess: &Session, items: &lang_items::LanguageItems) {
         }
     }
 
+    // If we're not compiling with unwinding, we won't actually need these
+    // symbols. Other panic runtimes ensure that the relevant symbols are
+    // available to link things together, but they're never exercised.
+    let mut whitelisted = HashSet::new();
+    if sess.panic_strategy() != PanicStrategy::Unwind {
+        whitelisted.insert(lang_items::EhPersonalityLangItem);
+        whitelisted.insert(lang_items::EhUnwindResumeLangItem);
+    }
+
     $(
-        if missing.contains(&lang_items::$item) && items.$name().is_none() {
+        if missing.contains(&lang_items::$item) &&
+           !whitelisted.contains(&lang_items::$item) &&
+           items.$name().is_none() {
             sess.err(&format!("language item required, but not found: `{}`",
                               stringify!($name)));
 
@@ -109,10 +124,13 @@ impl<'a> Context<'a> {
 }
 
 impl<'a, 'v> Visitor<'v> for Context<'a> {
+    fn nested_visit_map<'this>(&'this mut self) -> NestedVisitorMap<'this, 'v> {
+        NestedVisitorMap::None
+    }
+
     fn visit_foreign_item(&mut self, i: &hir::ForeignItem) {
-        match lang_items::extract(&i.attrs) {
-            None => {}
-            Some(lang_item) => self.register(&lang_item, i.span),
+        if let Some(lang_item) = lang_items::extract(&i.attrs) {
+            self.register(&lang_item.as_str(), i.span);
         }
         intravisit::walk_foreign_item(self, i)
     }

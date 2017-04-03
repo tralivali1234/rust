@@ -41,12 +41,13 @@
 #[cfg(not(test))]
 #[macro_export]
 #[stable(feature = "rust1", since = "1.0.0")]
+#[allow_internal_unstable]
 macro_rules! vec {
     ($elem:expr; $n:expr) => (
         $crate::vec::from_elem($elem, $n)
     );
     ($($x:expr),*) => (
-        <[_]>::into_vec($crate::boxed::Box::new([$($x),*]))
+        <[_]>::into_vec(box [$($x),*])
     );
     ($($x:expr,)*) => (vec![$($x),*])
 }
@@ -61,13 +62,21 @@ macro_rules! vec {
         $crate::vec::from_elem($elem, $n)
     );
     ($($x:expr),*) => (
-        $crate::slice::into_vec($crate::boxed::Box::new([$($x),*]))
+        $crate::slice::into_vec(box [$($x),*])
     );
     ($($x:expr,)*) => (vec![$($x),*])
 }
 
 /// Use the syntax described in `std::fmt` to create a value of type `String`.
-/// See `std::fmt` for more information.
+/// See [`std::fmt`][fmt] for more information.
+///
+/// [fmt]: ../std/fmt/index.html
+///
+/// # Panics
+///
+/// `format!` panics if a formatting trait implementation returns an error.
+/// This indicates an incorrect implementation
+/// since `fmt::Write for String` never returns an error itself.
 ///
 /// # Examples
 ///

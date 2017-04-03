@@ -10,20 +10,33 @@
 
 // Can't use empty braced struct as enum pattern
 
-#![feature(braced_empty_structs)]
+// aux-build:empty-struct.rs
+
+extern crate empty_struct;
+use empty_struct::*;
 
 enum E {
-    Empty2 {}
+    Empty3 {}
 }
 
 fn main() {
-    let e2 = E::Empty2 {};
+    let e3 = E::Empty3 {};
+    let xe3 = XE::XEmpty3 {};
 
-    // Rejected by parser as yet
-    // match e2 {
-    //     E::Empty2() => () // ERROR `E::Empty2` does not name a tuple variant or a tuple struct
-    // }
-    match e2 {
-        E::Empty2(..) => () //~ ERROR `E::Empty2` does not name a tuple variant or a tuple struct
+    match e3 {
+        E::Empty3() => ()
+        //~^ ERROR expected tuple struct/variant, found struct variant `E::Empty3`
+    }
+    match xe3 {
+        XE::XEmpty3() => ()
+        //~^ ERROR expected tuple struct/variant, found struct variant `XE::XEmpty3`
+    }
+    match e3 {
+        E::Empty3(..) => ()
+        //~^ ERROR expected tuple struct/variant, found struct variant `E::Empty3`
+    }
+    match xe3 {
+        XE::XEmpty3(..) => ()
+        //~^ ERROR expected tuple struct/variant, found struct variant `XE::XEmpty3
     }
 }

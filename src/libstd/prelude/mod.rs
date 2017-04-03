@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! The Rust Prelude
+//! The Rust Prelude.
 //!
 //! Rust comes with a variety of things in its standard library. However, if
 //! you had to manually import every single thing that you used, it would be
@@ -17,7 +17,7 @@
 //!
 //! The *prelude* is the list of things that Rust automatically imports into
 //! every Rust program. It's kept as small as possible, and is focused on
-//! things, particuarly traits, which are used in almost every single Rust
+//! things, particularly traits, which are used in almost every single Rust
 //! program.
 //!
 //! On a technical level, Rust inserts
@@ -45,7 +45,7 @@
 //!
 //! The difference between 'the prelude' and these other preludes is that they
 //! are not automatically `use`'d, and must be imported manually. This is still
-//! easier than importing all of their consitutent components.
+//! easier than importing all of their constituent components.
 //!
 //! # Prelude contents
 //!
@@ -55,14 +55,14 @@
 //! * [`std::marker`]::{[`Copy`], [`Send`], [`Sized`], [`Sync`]}. The marker
 //!   traits indicate fundamental properties of types.
 //! * [`std::ops`]::{[`Drop`], [`Fn`], [`FnMut`], [`FnOnce`]}. Various
-//!   operations for both destuctors and overloading `()`.
+//!   operations for both destructors and overloading `()`.
 //! * [`std::mem`]::[`drop`], a convenience function for explicitly dropping a
 //!   value.
 //! * [`std::boxed`]::[`Box`], a way to allocate values on the heap.
 //! * [`std::borrow`]::[`ToOwned`], The conversion trait that defines
-//!   [`to_owned()`], the generic method for creating an owned type from a
+//!   [`to_owned`], the generic method for creating an owned type from a
 //!   borrowed type.
-//! * [`std::clone`]::[`Clone`], the ubiquitous trait that defines [`clone()`],
+//! * [`std::clone`]::[`Clone`], the ubiquitous trait that defines [`clone`],
 //!   the method for producing a copy of a value.
 //! * [`std::cmp`]::{[`PartialEq`], [`PartialOrd`], [`Eq`], [`Ord`] }. The
 //!   comparison traits, which implement the comparison operators and are often
@@ -117,7 +117,7 @@
 //! [`ToOwned`]: ../borrow/trait.ToOwned.html
 //! [`ToString`]: ../string/trait.ToString.html
 //! [`Vec`]: ../vec/struct.Vec.html
-//! [`clone()`]: ../clone/trait.Clone.html#tymethod.clone
+//! [`clone`]: ../clone/trait.Clone.html#tymethod.clone
 //! [`drop`]: ../mem/fn.drop.html
 //! [`std::borrow`]: ../borrow/index.html
 //! [`std::boxed`]: ../boxed/index.html
@@ -135,7 +135,7 @@
 //! [`std::slice`]: ../slice/index.html
 //! [`std::string`]: ../string/index.html
 //! [`std::vec`]: ../vec/index.html
-//! [`to_owned()`]: ../borrow/trait.ToOwned.html#tymethod.to_owned
+//! [`to_owned`]: ../borrow/trait.ToOwned.html#tymethod.to_owned
 //! [book-closures]: ../../book/closures.html
 //! [book-dtor]: ../../book/drop.html
 //! [book-enums]: ../../book/enums.html

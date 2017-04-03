@@ -9,12 +9,10 @@
 // except according to those terms.
 
 #![allow(unknown_features)]
-#![feature(unboxed_closures)]
 
 use std::ops::FnMut;
 
 fn make_adder(x: isize) -> Box<FnMut(isize)->isize + 'static> {
-    // FIXME (#22405): Replace `Box::new` with `box` here when/if possible.
     Box::new(move |y| { x + y })
 }
 

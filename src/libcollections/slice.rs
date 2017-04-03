@@ -36,7 +36,7 @@
 //!
 //! ## Structs
 //!
-//! There are several structs that are useful for slices, such as `Iter`, which
+//! There are several structs that are useful for slices, such as [`Iter`], which
 //! represents iteration over a slice.
 //!
 //! ## Trait Implementations
@@ -44,9 +44,9 @@
 //! There are several implementations of common traits for slices. Some examples
 //! include:
 //!
-//! * `Clone`
-//! * `Eq`, `Ord` - for slices whose element type are `Eq` or `Ord`.
-//! * `Hash` - for slices whose element type is `Hash`
+//! * [`Clone`]
+//! * [`Eq`], [`Ord`] - for slices whose element type are [`Eq`] or [`Ord`].
+//! * [`Hash`] - for slices whose element type is [`Hash`].
 //!
 //! ## Iteration
 //!
@@ -73,30 +73,35 @@
 //! the element type of the slice is `i32`, the element type of the iterator is
 //! `&mut i32`.
 //!
-//! * `.iter()` and `.iter_mut()` are the explicit methods to return the default
+//! * [`.iter`] and [`.iter_mut`] are the explicit methods to return the default
 //!   iterators.
-//! * Further methods that return iterators are `.split()`, `.splitn()`,
-//!   `.chunks()`, `.windows()` and more.
+//! * Further methods that return iterators are [`.split`], [`.splitn`],
+//!   [`.chunks`], [`.windows`] and more.
 //!
-//! *[See also the slice primitive type](../primitive.slice.html).*
+//! *[See also the slice primitive type](../../std/primitive.slice.html).*
+//!
+//! [`Clone`]: ../../std/clone/trait.Clone.html
+//! [`Eq`]: ../../std/cmp/trait.Eq.html
+//! [`Ord`]: ../../std/cmp/trait.Ord.html
+//! [`Iter`]: struct.Iter.html
+//! [`Hash`]: ../../std/hash/trait.Hash.html
+//! [`.iter`]: ../../std/primitive.slice.html#method.iter
+//! [`.iter_mut`]: ../../std/primitive.slice.html#method.iter_mut
+//! [`.split`]: ../../std/primitive.slice.html#method.split
+//! [`.splitn`]: ../../std/primitive.slice.html#method.splitn
+//! [`.chunks`]: ../../std/primitive.slice.html#method.chunks
+//! [`.windows`]: ../../std/primitive.slice.html#method.windows
 #![stable(feature = "rust1", since = "1.0.0")]
 
 // Many of the usings in this module are only used in the test configuration.
 // It's cleaner to just turn off the unused_imports warning than to fix them.
-#![allow(unused_imports)]
+#![cfg_attr(test, allow(unused_imports, dead_code))]
 
 use alloc::boxed::Box;
-use core::clone::Clone;
-use core::cmp::Ordering::{self, Greater, Less};
-use core::cmp::{self, Ord, PartialEq};
-use core::iter::Iterator;
-use core::marker::Sized;
+use core::cmp::Ordering::{self, Less};
 use core::mem::size_of;
 use core::mem;
-use core::ops::FnMut;
-use core::option::Option::{self, Some, None};
 use core::ptr;
-use core::result::Result;
 use core::slice as core_slice;
 
 use borrow::{Borrow, BorrowMut, ToOwned};
@@ -110,11 +115,10 @@ pub use core::slice::{Iter, IterMut};
 pub use core::slice::{SplitMut, ChunksMut, Split};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::slice::{SplitN, RSplitN, SplitNMut, RSplitNMut};
-#[unstable(feature = "slice_bytes", issue = "27740")]
-#[allow(deprecated)]
-pub use core::slice::bytes;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::slice::{from_raw_parts, from_raw_parts_mut};
+#[unstable(feature = "slice_get_slice", issue = "35729")]
+pub use core::slice::SliceIndex;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic slice extension methods
@@ -136,12 +140,7 @@ pub use self::hack::to_vec;
 // `test_permutations` test
 mod hack {
     use alloc::boxed::Box;
-    use core::clone::Clone;
-    #[cfg(test)]
-    use core::iter::Iterator;
     use core::mem;
-    #[cfg(test)]
-    use core::option::Option::{Some, None};
 
     #[cfg(test)]
     use string::ToString;
@@ -165,7 +164,6 @@ mod hack {
     }
 }
 
-/// Allocating extension methods for slices.
 #[lang = "slice"]
 #[cfg(not(test))]
 impl<T> [T] {
@@ -183,7 +181,7 @@ impl<T> [T] {
         core_slice::SliceExt::len(self)
     }
 
-    /// Returns true if the slice has a length of 0
+    /// Returns `true` if the slice has a length of 0.
     ///
     /// # Example
     ///
@@ -197,7 +195,7 @@ impl<T> [T] {
         core_slice::SliceExt::is_empty(self)
     }
 
-    /// Returns the first element of a slice, or `None` if it is empty.
+    /// Returns the first element of the slice, or `None` if it is empty.
     ///
     /// # Examples
     ///
@@ -214,28 +212,74 @@ impl<T> [T] {
         core_slice::SliceExt::first(self)
     }
 
-    /// Returns a mutable pointer to the first element of a slice, or `None` if it is empty
+    /// Returns a mutable pointer to the first element of the slice, or `None` if it is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &mut [0, 1, 2];
+    ///
+    /// if let Some(first) = x.first_mut() {
+    ///     *first = 5;
+    /// }
+    /// assert_eq!(x, &[5, 1, 2]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn first_mut(&mut self) -> Option<&mut T> {
         core_slice::SliceExt::first_mut(self)
     }
 
-    /// Returns the first and all the rest of the elements of a slice.
+    /// Returns the first and all the rest of the elements of the slice, or `None` if it is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &[0, 1, 2];
+    ///
+    /// if let Some((first, elements)) = x.split_first() {
+    ///     assert_eq!(first, &0);
+    ///     assert_eq!(elements, &[1, 2]);
+    /// }
+    /// ```
     #[stable(feature = "slice_splits", since = "1.5.0")]
     #[inline]
     pub fn split_first(&self) -> Option<(&T, &[T])> {
         core_slice::SliceExt::split_first(self)
     }
 
-    /// Returns the first and all the rest of the elements of a slice.
+    /// Returns the first and all the rest of the elements of the slice, or `None` if it is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &mut [0, 1, 2];
+    ///
+    /// if let Some((first, elements)) = x.split_first_mut() {
+    ///     *first = 3;
+    ///     elements[0] = 4;
+    ///     elements[1] = 5;
+    /// }
+    /// assert_eq!(x, &[3, 4, 5]);
+    /// ```
     #[stable(feature = "slice_splits", since = "1.5.0")]
     #[inline]
     pub fn split_first_mut(&mut self) -> Option<(&mut T, &mut [T])> {
         core_slice::SliceExt::split_first_mut(self)
     }
 
-    /// Returns the last and all the rest of the elements of a slice.
+    /// Returns the last and all the rest of the elements of the slice, or `None` if it is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &[0, 1, 2];
+    ///
+    /// if let Some((last, elements)) = x.split_last() {
+    ///     assert_eq!(last, &2);
+    ///     assert_eq!(elements, &[0, 1]);
+    /// }
+    /// ```
     #[stable(feature = "slice_splits", since = "1.5.0")]
     #[inline]
     pub fn split_last(&self) -> Option<(&T, &[T])> {
@@ -243,14 +287,27 @@ impl<T> [T] {
 
     }
 
-    /// Returns the last and all the rest of the elements of a slice.
+    /// Returns the last and all the rest of the elements of the slice, or `None` if it is empty.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &mut [0, 1, 2];
+    ///
+    /// if let Some((last, elements)) = x.split_last_mut() {
+    ///     *last = 3;
+    ///     elements[0] = 4;
+    ///     elements[1] = 5;
+    /// }
+    /// assert_eq!(x, &[4, 5, 3]);
+    /// ```
     #[stable(feature = "slice_splits", since = "1.5.0")]
     #[inline]
     pub fn split_last_mut(&mut self) -> Option<(&mut T, &mut [T])> {
         core_slice::SliceExt::split_last_mut(self)
     }
 
-    /// Returns the last element of a slice, or `None` if it is empty.
+    /// Returns the last element of the slice, or `None` if it is empty.
     ///
     /// # Examples
     ///
@@ -268,58 +325,133 @@ impl<T> [T] {
     }
 
     /// Returns a mutable pointer to the last item in the slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &mut [0, 1, 2];
+    ///
+    /// if let Some(last) = x.last_mut() {
+    ///     *last = 10;
+    /// }
+    /// assert_eq!(x, &[0, 1, 10]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn last_mut(&mut self) -> Option<&mut T> {
         core_slice::SliceExt::last_mut(self)
     }
 
-    /// Returns the element of a slice at the given index, or `None` if the
-    /// index is out of bounds.
+    /// Returns a reference to an element or subslice depending on the type of
+    /// index.
+    ///
+    /// - If given a position, returns a reference to the element at that
+    ///   position or `None` if out of bounds.
+    /// - If given a range, returns the subslice corresponding to that range,
+    ///   or `None` if out of bounds.
     ///
     /// # Examples
     ///
     /// ```
     /// let v = [10, 40, 30];
     /// assert_eq!(Some(&40), v.get(1));
+    /// assert_eq!(Some(&[10, 40][..]), v.get(0..2));
     /// assert_eq!(None, v.get(3));
+    /// assert_eq!(None, v.get(0..4));
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub fn get<I>(&self, index: I) -> Option<&I::Output>
+        where I: SliceIndex<Self>
+    {
         core_slice::SliceExt::get(self, index)
     }
 
-    /// Returns a mutable reference to the element at the given index,
-    /// or `None` if the index is out of bounds
+    /// Returns a mutable reference to an element or subslice depending on the
+    /// type of index (see [`get`]) or `None` if the index is out of bounds.
+    ///
+    /// [`get`]: #method.get
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &mut [0, 1, 2];
+    ///
+    /// if let Some(elem) = x.get_mut(1) {
+    ///     *elem = 42;
+    /// }
+    /// assert_eq!(x, &[0, 42, 2]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+    pub fn get_mut<I>(&mut self, index: I) -> Option<&mut I::Output>
+        where I: SliceIndex<Self>
+    {
         core_slice::SliceExt::get_mut(self, index)
     }
 
-    /// Returns a pointer to the element at the given index, without doing
-    /// bounds checking.
+    /// Returns a reference to an element or subslice, without doing bounds
+    /// checking. So use it very carefully!
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &[1, 2, 4];
+    ///
+    /// unsafe {
+    ///     assert_eq!(x.get_unchecked(1), &2);
+    /// }
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub unsafe fn get_unchecked(&self, index: usize) -> &T {
+    pub unsafe fn get_unchecked<I>(&self, index: I) -> &I::Output
+        where I: SliceIndex<Self>
+    {
         core_slice::SliceExt::get_unchecked(self, index)
     }
 
-    /// Returns an unsafe mutable pointer to the element in index
+    /// Returns a mutable reference to an element or subslice, without doing
+    /// bounds checking. So use it very carefully!
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &mut [1, 2, 4];
+    ///
+    /// unsafe {
+    ///     let elem = x.get_unchecked_mut(1);
+    ///     *elem = 13;
+    /// }
+    /// assert_eq!(x, &[1, 13, 4]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub unsafe fn get_unchecked_mut(&mut self, index: usize) -> &mut T {
+    pub unsafe fn get_unchecked_mut<I>(&mut self, index: I) -> &mut I::Output
+        where I: SliceIndex<Self>
+    {
         core_slice::SliceExt::get_unchecked_mut(self, index)
     }
 
-    /// Returns an raw pointer to the slice's buffer
+    /// Returns a raw pointer to the slice's buffer.
     ///
     /// The caller must ensure that the slice outlives the pointer this
     /// function returns, or else it will end up pointing to garbage.
     ///
-    /// Modifying the slice may cause its buffer to be reallocated, which
-    /// would also make any pointers to it invalid.
+    /// Modifying the container referenced by this slice may cause its buffer
+    /// to be reallocated, which would also make any pointers to it invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &[1, 2, 4];
+    /// let x_ptr = x.as_ptr();
+    ///
+    /// unsafe {
+    ///     for i in 0..x.len() {
+    ///         assert_eq!(x.get_unchecked(i), &*x_ptr.offset(i as isize));
+    ///     }
+    /// }
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn as_ptr(&self) -> *const T {
@@ -331,15 +463,29 @@ impl<T> [T] {
     /// The caller must ensure that the slice outlives the pointer this
     /// function returns, or else it will end up pointing to garbage.
     ///
-    /// Modifying the slice may cause its buffer to be reallocated, which
-    /// would also make any pointers to it invalid.
+    /// Modifying the container referenced by this slice may cause its buffer
+    /// to be reallocated, which would also make any pointers to it invalid.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &mut [1, 2, 4];
+    /// let x_ptr = x.as_mut_ptr();
+    ///
+    /// unsafe {
+    ///     for i in 0..x.len() {
+    ///         *x_ptr.offset(i as isize) += 2;
+    ///     }
+    /// }
+    /// assert_eq!(x, &[3, 4, 6]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut T {
         core_slice::SliceExt::as_mut_ptr(self)
     }
 
-    /// Swaps two elements in a slice.
+    /// Swaps two elements in the slice.
     ///
     /// # Arguments
     ///
@@ -350,9 +496,9 @@ impl<T> [T] {
     ///
     /// Panics if `a` or `b` are out of bounds.
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// let mut v = ["a", "b", "c", "d"];
     /// v.swap(1, 3);
     /// assert!(v == ["a", "d", "c", "b"]);
@@ -363,11 +509,11 @@ impl<T> [T] {
         core_slice::SliceExt::swap(self, a, b)
     }
 
-    /// Reverse the order of elements in a slice, in place.
+    /// Reverses the order of elements in the slice, in place.
     ///
     /// # Example
     ///
-    /// ```rust
+    /// ```
     /// let mut v = [1, 2, 3];
     /// v.reverse();
     /// assert!(v == [3, 2, 1]);
@@ -379,13 +525,35 @@ impl<T> [T] {
     }
 
     /// Returns an iterator over the slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &[1, 2, 4];
+    /// let mut iterator = x.iter();
+    ///
+    /// assert_eq!(iterator.next(), Some(&1));
+    /// assert_eq!(iterator.next(), Some(&2));
+    /// assert_eq!(iterator.next(), Some(&4));
+    /// assert_eq!(iterator.next(), None);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn iter(&self) -> Iter<T> {
         core_slice::SliceExt::iter(self)
     }
 
-    /// Returns an iterator that allows modifying each value
+    /// Returns an iterator that allows modifying each value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let x = &mut [1, 2, 4];
+    /// for elem in x.iter_mut() {
+    ///     *elem += 2;
+    /// }
+    /// assert_eq!(x, &[3, 4, 6]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn iter_mut(&mut self) -> IterMut<T> {
@@ -402,14 +570,21 @@ impl<T> [T] {
     ///
     /// # Example
     ///
-    /// Print the adjacent pairs of a slice (i.e. `[1,2]`, `[2,3]`,
-    /// `[3,4]`):
+    /// ```
+    /// let slice = ['r', 'u', 's', 't'];
+    /// let mut iter = slice.windows(2);
+    /// assert_eq!(iter.next().unwrap(), &['r', 'u']);
+    /// assert_eq!(iter.next().unwrap(), &['u', 's']);
+    /// assert_eq!(iter.next().unwrap(), &['s', 't']);
+    /// assert!(iter.next().is_none());
+    /// ```
     ///
-    /// ```rust
-    /// let v = &[1, 2, 3, 4];
-    /// for win in v.windows(2) {
-    ///     println!("{:?}", win);
-    /// }
+    /// If the slice is shorter than `size`:
+    ///
+    /// ```
+    /// let slice = ['f', 'o', 'o'];
+    /// let mut iter = slice.windows(4);
+    /// assert!(iter.next().is_none());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
@@ -418,9 +593,9 @@ impl<T> [T] {
     }
 
     /// Returns an iterator over `size` elements of the slice at a
-    /// time. The chunks do not overlap. If `size` does not divide the
-    /// length of the slice, then the last chunk will not have length
-    /// `size`.
+    /// time. The chunks are slices and do not overlap. If `size` does
+    /// not divide the length of the slice, then the last chunk will
+    /// not have length `size`.
     ///
     /// # Panics
     ///
@@ -428,14 +603,13 @@ impl<T> [T] {
     ///
     /// # Example
     ///
-    /// Print the slice two elements at a time (i.e. `[1,2]`,
-    /// `[3,4]`, `[5]`):
-    ///
-    /// ```rust
-    /// let v = &[1, 2, 3, 4, 5];
-    /// for win in v.chunks(2) {
-    ///     println!("{:?}", win);
-    /// }
+    /// ```
+    /// let slice = ['l', 'o', 'r', 'e', 'm'];
+    /// let mut iter = slice.chunks(2);
+    /// assert_eq!(iter.next().unwrap(), &['l', 'o']);
+    /// assert_eq!(iter.next().unwrap(), &['r', 'e']);
+    /// assert_eq!(iter.next().unwrap(), &['m']);
+    /// assert!(iter.next().is_none());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
@@ -444,13 +618,28 @@ impl<T> [T] {
     }
 
     /// Returns an iterator over `chunk_size` elements of the slice at a time.
-    /// The chunks are mutable and do not overlap. If `chunk_size` does
+    /// The chunks are mutable slices, and do not overlap. If `chunk_size` does
     /// not divide the length of the slice, then the last chunk will not
     /// have length `chunk_size`.
     ///
     /// # Panics
     ///
     /// Panics if `chunk_size` is 0.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let v = &mut [0, 0, 0, 0, 0];
+    /// let mut count = 1;
+    ///
+    /// for chunk in v.chunks_mut(2) {
+    ///     for elem in chunk.iter_mut() {
+    ///         *elem += count;
+    ///     }
+    ///     count += 1;
+    /// }
+    /// assert_eq!(v, &[1, 1, 2, 2, 3]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn chunks_mut(&mut self, chunk_size: usize) -> ChunksMut<T> {
@@ -491,9 +680,9 @@ impl<T> [T] {
     ///
     /// Panics if `mid > len`.
     ///
-    /// # Example
+    /// # Examples
     ///
-    /// ```rust
+    /// ```
     /// let mut v = [1, 2, 3, 4, 5, 6];
     ///
     /// // scoped to restrict the lifetime of the borrows
@@ -522,18 +711,44 @@ impl<T> [T] {
     }
 
     /// Returns an iterator over subslices separated by elements that match
-    /// `pred`.  The matched element is not contained in the subslices.
+    /// `pred`. The matched element is not contained in the subslices.
     ///
     /// # Examples
     ///
-    /// Print the slice split by numbers divisible by 3 (i.e. `[10, 40]`,
-    /// `[20]`, `[50]`):
+    /// ```
+    /// let slice = [10, 40, 33, 20];
+    /// let mut iter = slice.split(|num| num % 3 == 0);
+    ///
+    /// assert_eq!(iter.next().unwrap(), &[10, 40]);
+    /// assert_eq!(iter.next().unwrap(), &[20]);
+    /// assert!(iter.next().is_none());
+    /// ```
+    ///
+    /// If the first element is matched, an empty slice will be the first item
+    /// returned by the iterator. Similarly, if the last element in the slice
+    /// is matched, an empty slice will be the last item returned by the
+    /// iterator:
     ///
     /// ```
-    /// let v = [10, 40, 30, 20, 60, 50];
-    /// for group in v.split(|num| *num % 3 == 0) {
-    ///     println!("{:?}", group);
-    /// }
+    /// let slice = [10, 40, 33];
+    /// let mut iter = slice.split(|num| num % 3 == 0);
+    ///
+    /// assert_eq!(iter.next().unwrap(), &[10, 40]);
+    /// assert_eq!(iter.next().unwrap(), &[]);
+    /// assert!(iter.next().is_none());
+    /// ```
+    ///
+    /// If two matched elements are directly adjacent, an empty slice will be
+    /// present between them:
+    ///
+    /// ```
+    /// let slice = [10, 6, 33, 20];
+    /// let mut iter = slice.split(|num| num % 3 == 0);
+    ///
+    /// assert_eq!(iter.next().unwrap(), &[10]);
+    /// assert_eq!(iter.next().unwrap(), &[]);
+    /// assert_eq!(iter.next().unwrap(), &[20]);
+    /// assert!(iter.next().is_none());
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
@@ -544,7 +759,18 @@ impl<T> [T] {
     }
 
     /// Returns an iterator over mutable subslices separated by elements that
-    /// match `pred`.  The matched element is not contained in the subslices.
+    /// match `pred`. The matched element is not contained in the subslices.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut v = [10, 40, 30, 20, 60, 50];
+    ///
+    /// for group in v.split_mut(|num| *num % 3 == 0) {
+    ///     group[0] = 1;
+    /// }
+    /// assert_eq!(v, [1, 40, 30, 1, 60, 1]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn split_mut<F>(&mut self, pred: F) -> SplitMut<T, F>
@@ -554,7 +780,7 @@ impl<T> [T] {
     }
 
     /// Returns an iterator over subslices separated by elements that match
-    /// `pred`, limited to returning at most `n` items.  The matched element is
+    /// `pred`, limited to returning at most `n` items. The matched element is
     /// not contained in the subslices.
     ///
     /// The last element returned, if any, will contain the remainder of the
@@ -567,6 +793,7 @@ impl<T> [T] {
     ///
     /// ```
     /// let v = [10, 40, 30, 20, 60, 50];
+    ///
     /// for group in v.splitn(2, |num| *num % 3 == 0) {
     ///     println!("{:?}", group);
     /// }
@@ -580,11 +807,22 @@ impl<T> [T] {
     }
 
     /// Returns an iterator over subslices separated by elements that match
-    /// `pred`, limited to returning at most `n` items.  The matched element is
+    /// `pred`, limited to returning at most `n` items. The matched element is
     /// not contained in the subslices.
     ///
     /// The last element returned, if any, will contain the remainder of the
     /// slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut v = [10, 40, 30, 20, 60, 50];
+    ///
+    /// for group in v.splitn_mut(2, |num| *num % 3 == 0) {
+    ///     group[0] = 1;
+    /// }
+    /// assert_eq!(v, [1, 40, 30, 1, 60, 50]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn splitn_mut<F>(&mut self, n: usize, pred: F) -> SplitNMut<T, F>
@@ -608,6 +846,7 @@ impl<T> [T] {
     ///
     /// ```
     /// let v = [10, 40, 30, 20, 60, 50];
+    ///
     /// for group in v.rsplitn(2, |num| *num % 3 == 0) {
     ///     println!("{:?}", group);
     /// }
@@ -622,11 +861,22 @@ impl<T> [T] {
 
     /// Returns an iterator over subslices separated by elements that match
     /// `pred` limited to returning at most `n` items. This starts at the end of
-    /// the slice and works backwards.  The matched element is not contained in
+    /// the slice and works backwards. The matched element is not contained in
     /// the subslices.
     ///
     /// The last element returned, if any, will contain the remainder of the
     /// slice.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut s = [10, 40, 30, 20, 60, 50];
+    ///
+    /// for group in s.rsplitn_mut(2, |num| *num % 3 == 0) {
+    ///     group[0] = 1;
+    /// }
+    /// assert_eq!(s, [1, 40, 30, 20, 60, 1]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn rsplitn_mut<F>(&mut self, n: usize, pred: F) -> RSplitNMut<T, F>
@@ -635,7 +885,7 @@ impl<T> [T] {
         core_slice::SliceExt::rsplitn_mut(self, n, pred)
     }
 
-    /// Returns true if the slice contains an element with the given value.
+    /// Returns `true` if the slice contains an element with the given value.
     ///
     /// # Examples
     ///
@@ -651,7 +901,7 @@ impl<T> [T] {
         core_slice::SliceExt::contains(self, x)
     }
 
-    /// Returns true if `needle` is a prefix of the slice.
+    /// Returns `true` if `needle` is a prefix of the slice.
     ///
     /// # Examples
     ///
@@ -662,6 +912,15 @@ impl<T> [T] {
     /// assert!(!v.starts_with(&[50]));
     /// assert!(!v.starts_with(&[10, 50]));
     /// ```
+    ///
+    /// Always returns `true` if `needle` is an empty slice:
+    ///
+    /// ```
+    /// let v = &[10, 40, 30];
+    /// assert!(v.starts_with(&[]));
+    /// let v: &[u8] = &[];
+    /// assert!(v.starts_with(&[]));
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn starts_with(&self, needle: &[T]) -> bool
         where T: PartialEq
@@ -669,7 +928,7 @@ impl<T> [T] {
         core_slice::SliceExt::starts_with(self, needle)
     }
 
-    /// Returns true if `needle` is a suffix of the slice.
+    /// Returns `true` if `needle` is a suffix of the slice.
     ///
     /// # Examples
     ///
@@ -680,6 +939,15 @@ impl<T> [T] {
     /// assert!(!v.ends_with(&[50]));
     /// assert!(!v.ends_with(&[50, 30]));
     /// ```
+    ///
+    /// Always returns `true` if `needle` is an empty slice:
+    ///
+    /// ```
+    /// let v = &[10, 40, 30];
+    /// assert!(v.ends_with(&[]));
+    /// let v: &[u8] = &[];
+    /// assert!(v.ends_with(&[]));
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn ends_with(&self, needle: &[T]) -> bool
         where T: PartialEq
@@ -687,7 +955,7 @@ impl<T> [T] {
         core_slice::SliceExt::ends_with(self, needle)
     }
 
-    /// Binary search a sorted slice for a given element.
+    /// Binary searches this sorted slice for a given element.
     ///
     /// If the value is found then `Ok` is returned, containing the
     /// index of the matching element; if the value is not found then
@@ -698,9 +966,9 @@ impl<T> [T] {
     ///
     /// Looks up a series of four elements. The first is found, with a
     /// uniquely determined position; the second and third are not
-    /// found; the fourth could match any position in `[1,4]`.
+    /// found; the fourth could match any position in `[1, 4]`.
     ///
-    /// ```rust
+    /// ```
     /// let s = [0, 1, 1, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
     ///
     /// assert_eq!(s.binary_search(&13),  Ok(9));
@@ -716,7 +984,7 @@ impl<T> [T] {
         core_slice::SliceExt::binary_search(self, x)
     }
 
-    /// Binary search a sorted slice with a comparator function.
+    /// Binary searches this sorted slice with a comparator function.
     ///
     /// The comparator function should implement an order consistent
     /// with the sort order of the underlying slice, returning an
@@ -732,9 +1000,9 @@ impl<T> [T] {
     ///
     /// Looks up a series of four elements. The first is found, with a
     /// uniquely determined position; the second and third are not
-    /// found; the fourth could match any position in `[1,4]`.
+    /// found; the fourth could match any position in `[1, 4]`.
     ///
-    /// ```rust
+    /// ```
     /// let s = [0, 1, 1, 1, 1, 2, 3, 5, 8, 13, 21, 34, 55];
     ///
     /// let seek = 13;
@@ -749,21 +1017,68 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn binary_search_by<F>(&self, f: F) -> Result<usize, usize>
-        where F: FnMut(&T) -> Ordering
+    pub fn binary_search_by<'a, F>(&'a self, f: F) -> Result<usize, usize>
+        where F: FnMut(&'a T) -> Ordering
     {
         core_slice::SliceExt::binary_search_by(self, f)
     }
 
-    /// Sorts the slice, in place.
+    /// Binary searches this sorted slice with a key extraction function.
     ///
-    /// This is equivalent to `self.sort_by(|a, b| a.cmp(b))`.
+    /// Assumes that the slice is sorted by the key, for instance with
+    /// [`sort_by_key`] using the same key extraction function.
     ///
-    /// This is a stable sort.
+    /// If a matching value is found then returns `Ok`, containing the
+    /// index for the matched element; if no match is found then `Err`
+    /// is returned, containing the index where a matching element could
+    /// be inserted while maintaining sorted order.
+    ///
+    /// [`sort_by_key`]: #method.sort_by_key
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// Looks up a series of four elements in a slice of pairs sorted by
+    /// their second elements. The first is found, with a uniquely
+    /// determined position; the second and third are not found; the
+    /// fourth could match any position in `[1, 4]`.
+    ///
+    /// ```
+    /// let s = [(0, 0), (2, 1), (4, 1), (5, 1), (3, 1),
+    ///          (1, 2), (2, 3), (4, 5), (5, 8), (3, 13),
+    ///          (1, 21), (2, 34), (4, 55)];
+    ///
+    /// assert_eq!(s.binary_search_by_key(&13, |&(a,b)| b),  Ok(9));
+    /// assert_eq!(s.binary_search_by_key(&4, |&(a,b)| b),   Err(7));
+    /// assert_eq!(s.binary_search_by_key(&100, |&(a,b)| b), Err(13));
+    /// let r = s.binary_search_by_key(&1, |&(a,b)| b);
+    /// assert!(match r { Ok(1...4) => true, _ => false, });
+    /// ```
+    #[stable(feature = "slice_binary_search_by_key", since = "1.10.0")]
+    #[inline]
+    pub fn binary_search_by_key<'a, B, F>(&'a self, b: &B, f: F) -> Result<usize, usize>
+        where F: FnMut(&'a T) -> B,
+              B: Ord
+    {
+        core_slice::SliceExt::binary_search_by_key(self, b, f)
+    }
+
+    /// Sorts the slice.
+    ///
+    /// This sort is stable (i.e. does not reorder equal elements) and `O(n log n)` worst-case.
+    ///
+    /// # Current implementation
+    ///
+    /// The current algorithm is an adaptive, iterative merge sort inspired by
+    /// [timsort](https://en.wikipedia.org/wiki/Timsort).
+    /// It is designed to be very fast in cases where the slice is nearly sorted, or consists of
+    /// two or more sorted sequences concatenated one after another.
+    ///
+    /// Also, it allocates temporary storage half the size of `self`, but for short slices a
+    /// non-allocating insertion sort is used instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
     /// let mut v = [-5, 4, 1, -3, 2];
     ///
     /// v.sort();
@@ -774,45 +1089,26 @@ impl<T> [T] {
     pub fn sort(&mut self)
         where T: Ord
     {
-        self.sort_by(|a, b| a.cmp(b))
+        merge_sort(self, |a, b| a.lt(b));
     }
 
-    /// Sorts the slice, in place, using `key` to extract a key by which to
-    /// order the sort by.
+    /// Sorts the slice with a comparator function.
     ///
-    /// This sort is `O(n log n)` worst-case and stable, but allocates
-    /// approximately `2 * n`, where `n` is the length of `self`.
+    /// This sort is stable (i.e. does not reorder equal elements) and `O(n log n)` worst-case.
     ///
-    /// This is a stable sort.
+    /// # Current implementation
+    ///
+    /// The current algorithm is an adaptive, iterative merge sort inspired by
+    /// [timsort](https://en.wikipedia.org/wiki/Timsort).
+    /// It is designed to be very fast in cases where the slice is nearly sorted, or consists of
+    /// two or more sorted sequences concatenated one after another.
+    ///
+    /// Also, it allocates temporary storage half the size of `self`, but for short slices a
+    /// non-allocating insertion sort is used instead.
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// #![feature(slice_sort_by_key)]
-    ///
-    /// let mut v = [-5i32, 4, 1, -3, 2];
-    ///
-    /// v.sort_by_key(|k| k.abs());
-    /// assert!(v == [1, 2, -3, 4, -5]);
     /// ```
-    #[unstable(feature = "slice_sort_by_key", reason = "recently added",
-               issue = "27724")]
-    #[inline]
-    pub fn sort_by_key<B, F>(&mut self, mut f: F)
-        where F: FnMut(&T) -> B, B: Ord
-    {
-        self.sort_by(|a, b| f(a).cmp(&f(b)))
-    }
-
-    /// Sorts the slice, in place, using `compare` to compare
-    /// elements.
-    ///
-    /// This sort is `O(n log n)` worst-case and stable, but allocates
-    /// approximately `2 * n`, where `n` is the length of `self`.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
     /// let mut v = [5, 4, 1, 3, 2];
     /// v.sort_by(|a, b| a.cmp(b));
     /// assert!(v == [1, 2, 3, 4, 5]);
@@ -823,39 +1119,209 @@ impl<T> [T] {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn sort_by<F>(&mut self, compare: F)
+    pub fn sort_by<F>(&mut self, mut compare: F)
         where F: FnMut(&T, &T) -> Ordering
     {
-        merge_sort(self, compare)
+        merge_sort(self, |a, b| compare(a, b) == Less);
     }
 
-    /// Copies as many elements from `src` as it can into `self` (the
-    /// shorter of `self.len()` and `src.len()`). Returns the number
-    /// of elements copied.
+    /// Sorts the slice with a key extraction function.
+    ///
+    /// This sort is stable (i.e. does not reorder equal elements) and `O(n log n)` worst-case.
+    ///
+    /// # Current implementation
+    ///
+    /// The current algorithm is an adaptive, iterative merge sort inspired by
+    /// [timsort](https://en.wikipedia.org/wiki/Timsort).
+    /// It is designed to be very fast in cases where the slice is nearly sorted, or consists of
+    /// two or more sorted sequences concatenated one after another.
+    ///
+    /// Also, it allocates temporary storage half the size of `self`, but for short slices a
+    /// non-allocating insertion sort is used instead.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let mut v = [-5i32, 4, 1, -3, 2];
+    ///
+    /// v.sort_by_key(|k| k.abs());
+    /// assert!(v == [1, 2, -3, 4, -5]);
+    /// ```
+    #[stable(feature = "slice_sort_by_key", since = "1.7.0")]
+    #[inline]
+    pub fn sort_by_key<B, F>(&mut self, mut f: F)
+        where F: FnMut(&T) -> B, B: Ord
+    {
+        merge_sort(self, |a, b| f(a).lt(&f(b)));
+    }
+
+    /// Sorts the slice, but may not preserve the order of equal elements.
+    ///
+    /// This sort is unstable (i.e. may reorder equal elements), in-place (i.e. does not allocate),
+    /// and `O(n log n)` worst-case.
+    ///
+    /// # Current implementation
+    ///
+    /// The current algorithm is based on Orson Peters' [pattern-defeating quicksort][pdqsort],
+    /// which is a quicksort variant designed to be very fast on certain kinds of patterns,
+    /// sometimes achieving linear time. It is randomized but deterministic, and falls back to
+    /// heapsort on degenerate inputs.
+    ///
+    /// It is generally faster than stable sorting, except in a few special cases, e.g. when the
+    /// slice consists of several concatenated sorted sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(sort_unstable)]
+    ///
+    /// let mut v = [-5, 4, 1, -3, 2];
+    ///
+    /// v.sort_unstable();
+    /// assert!(v == [-5, -3, 1, 2, 4]);
+    /// ```
+    ///
+    /// [pdqsort]: https://github.com/orlp/pdqsort
+    // FIXME #40585: Mention `sort_unstable` in the documentation for `sort`.
+    #[unstable(feature = "sort_unstable", issue = "40585")]
+    #[inline]
+    pub fn sort_unstable(&mut self)
+        where T: Ord
+    {
+        core_slice::SliceExt::sort_unstable(self);
+    }
+
+    /// Sorts the slice with a comparator function, but may not preserve the order of equal
+    /// elements.
+    ///
+    /// This sort is unstable (i.e. may reorder equal elements), in-place (i.e. does not allocate),
+    /// and `O(n log n)` worst-case.
+    ///
+    /// # Current implementation
+    ///
+    /// The current algorithm is based on Orson Peters' [pattern-defeating quicksort][pdqsort],
+    /// which is a quicksort variant designed to be very fast on certain kinds of patterns,
+    /// sometimes achieving linear time. It is randomized but deterministic, and falls back to
+    /// heapsort on degenerate inputs.
+    ///
+    /// It is generally faster than stable sorting, except in a few special cases, e.g. when the
+    /// slice consists of several concatenated sorted sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(sort_unstable)]
+    ///
+    /// let mut v = [5, 4, 1, 3, 2];
+    /// v.sort_unstable_by(|a, b| a.cmp(b));
+    /// assert!(v == [1, 2, 3, 4, 5]);
+    ///
+    /// // reverse sorting
+    /// v.sort_unstable_by(|a, b| b.cmp(a));
+    /// assert!(v == [5, 4, 3, 2, 1]);
+    /// ```
+    ///
+    /// [pdqsort]: https://github.com/orlp/pdqsort
+    // FIXME #40585: Mention `sort_unstable_by` in the documentation for `sort_by`.
+    #[unstable(feature = "sort_unstable", issue = "40585")]
+    #[inline]
+    pub fn sort_unstable_by<F>(&mut self, compare: F)
+        where F: FnMut(&T, &T) -> Ordering
+    {
+        core_slice::SliceExt::sort_unstable_by(self, compare);
+    }
+
+    /// Sorts the slice with a key extraction function, but may not preserve the order of equal
+    /// elements.
+    ///
+    /// This sort is unstable (i.e. may reorder equal elements), in-place (i.e. does not allocate),
+    /// and `O(n log n)` worst-case.
+    ///
+    /// # Current implementation
+    ///
+    /// The current algorithm is based on Orson Peters' [pattern-defeating quicksort][pdqsort],
+    /// which is a quicksort variant designed to be very fast on certain kinds of patterns,
+    /// sometimes achieving linear time. It is randomized but deterministic, and falls back to
+    /// heapsort on degenerate inputs.
+    ///
+    /// It is generally faster than stable sorting, except in a few special cases, e.g. when the
+    /// slice consists of several concatenated sorted sequences.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(sort_unstable)]
+    ///
+    /// let mut v = [-5i32, 4, 1, -3, 2];
+    ///
+    /// v.sort_unstable_by_key(|k| k.abs());
+    /// assert!(v == [1, 2, -3, 4, -5]);
+    /// ```
+    ///
+    /// [pdqsort]: https://github.com/orlp/pdqsort
+    // FIXME #40585: Mention `sort_unstable_by_key` in the documentation for `sort_by_key`.
+    #[unstable(feature = "sort_unstable", issue = "40585")]
+    #[inline]
+    pub fn sort_unstable_by_key<B, F>(&mut self, f: F)
+        where F: FnMut(&T) -> B,
+              B: Ord
+    {
+        core_slice::SliceExt::sort_unstable_by_key(self, f);
+    }
+
+    /// Copies the elements from `src` into `self`.
+    ///
+    /// The length of `src` must be the same as `self`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the two slices have different lengths.
     ///
     /// # Example
     ///
-    /// ```rust
-    /// #![feature(clone_from_slice)]
-    ///
-    /// let mut dst = [0, 0, 0];
-    /// let src = [1, 2];
-    ///
-    /// assert!(dst.clone_from_slice(&src) == 2);
-    /// assert!(dst == [1, 2, 0]);
-    ///
-    /// let src2 = [3, 4, 5, 6];
-    /// assert!(dst.clone_from_slice(&src2) == 3);
-    /// assert!(dst == [3, 4, 5]);
     /// ```
-    #[unstable(feature = "clone_from_slice", issue = "27750")]
-    pub fn clone_from_slice(&mut self, src: &[T]) -> usize
-        where T: Clone
-    {
+    /// let mut dst = [0, 0, 0];
+    /// let src = [1, 2, 3];
+    ///
+    /// dst.clone_from_slice(&src);
+    /// assert!(dst == [1, 2, 3]);
+    /// ```
+    #[stable(feature = "clone_from_slice", since = "1.7.0")]
+    pub fn clone_from_slice(&mut self, src: &[T]) where T: Clone {
         core_slice::SliceExt::clone_from_slice(self, src)
     }
 
+    /// Copies all elements from `src` into `self`, using a memcpy.
+    ///
+    /// The length of `src` must be the same as `self`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the two slices have different lengths.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// let mut dst = [0, 0, 0];
+    /// let src = [1, 2, 3];
+    ///
+    /// dst.copy_from_slice(&src);
+    /// assert_eq!(src, dst);
+    /// ```
+    #[stable(feature = "copy_from_slice", since = "1.9.0")]
+    pub fn copy_from_slice(&mut self, src: &[T]) where T: Copy {
+        core_slice::SliceExt::copy_from_slice(self, src)
+    }
+
     /// Copies `self` into a new `Vec`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s = [10, 40, 30];
+    /// let x = s.to_vec();
+    /// // Here, `s` and `x` can be modified independently.
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn to_vec(&self) -> Vec<T>
@@ -866,6 +1332,16 @@ impl<T> [T] {
     }
 
     /// Converts `self` into a vector without clones or allocation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let s: Box<[i32]> = Box::new([10, 40, 30]);
+    /// let x = s.into_vec();
+    /// // `s` cannot be used anymore because it has been converted into `x`.
+    ///
+    /// assert_eq!(x, vec![10, 40, 30]);
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn into_vec(self: Box<Self>) -> Vec<T> {
@@ -989,213 +1465,329 @@ impl<T: Clone> ToOwned for [T] {
 // Sorting
 ////////////////////////////////////////////////////////////////////////////////
 
-fn insertion_sort<T, F>(v: &mut [T], mut compare: F)
-    where F: FnMut(&T, &T) -> Ordering
+/// Inserts `v[0]` into pre-sorted sequence `v[1..]` so that whole `v[..]` becomes sorted.
+///
+/// This is the integral subroutine of insertion sort.
+fn insert_head<T, F>(v: &mut [T], is_less: &mut F)
+    where F: FnMut(&T, &T) -> bool
 {
-    let len = v.len() as isize;
-    let buf_v = v.as_mut_ptr();
-
-    // 1 <= i < len;
-    for i in 1..len {
-        // j satisfies: 0 <= j <= i;
-        let mut j = i;
+    if v.len() >= 2 && is_less(&v[1], &v[0]) {
         unsafe {
-            // `i` is in bounds.
-            let read_ptr = buf_v.offset(i) as *const T;
+            // There are three ways to implement insertion here:
+            //
+            // 1. Swap adjacent elements until the first one gets to its final destination.
+            //    However, this way we copy data around more than is necessary. If elements are big
+            //    structures (costly to copy), this method will be slow.
+            //
+            // 2. Iterate until the right place for the first element is found. Then shift the
+            //    elements succeeding it to make room for it and finally place it into the
+            //    remaining hole. This is a good method.
+            //
+            // 3. Copy the first element into a temporary variable. Iterate until the right place
+            //    for it is found. As we go along, copy every traversed element into the slot
+            //    preceding it. Finally, copy data from the temporary variable into the remaining
+            //    hole. This method is very good. Benchmarks demonstrated slightly better
+            //    performance than with the 2nd method.
+            //
+            // All methods were benchmarked, and the 3rd showed best results. So we chose that one.
+            let mut tmp = NoDrop { value: ptr::read(&v[0]) };
 
-            // find where to insert, we need to do strict <,
-            // rather than <=, to maintain stability.
+            // Intermediate state of the insertion process is always tracked by `hole`, which
+            // serves two purposes:
+            // 1. Protects integrity of `v` from panics in `is_less`.
+            // 2. Fills the remaining hole in `v` in the end.
+            //
+            // Panic safety:
+            //
+            // If `is_less` panics at any point during the process, `hole` will get dropped and
+            // fill the hole in `v` with `tmp`, thus ensuring that `v` still holds every object it
+            // initially held exactly once.
+            let mut hole = InsertionHole {
+                src: &mut tmp.value,
+                dest: &mut v[1],
+            };
+            ptr::copy_nonoverlapping(&v[1], &mut v[0], 1);
 
-            // 0 <= j - 1 < len, so .offset(j - 1) is in bounds.
-            while j > 0 && compare(&*read_ptr, &*buf_v.offset(j - 1)) == Less {
-                j -= 1;
+            for i in 2..v.len() {
+                if !is_less(&v[i], &tmp.value) {
+                    break;
+                }
+                ptr::copy_nonoverlapping(&v[i], &mut v[i - 1], 1);
+                hole.dest = &mut v[i];
             }
+            // `hole` gets dropped and thus copies `tmp` into the remaining hole in `v`.
+        }
+    }
 
-            // shift everything to the right, to make space to
-            // insert this value.
+    // Holds a value, but never drops it.
+    #[allow(unions_with_drop_fields)]
+    union NoDrop<T> {
+        value: T
+    }
 
-            // j + 1 could be `len` (for the last `i`), but in
-            // that case, `i == j` so we don't copy. The
-            // `.offset(j)` is always in bounds.
+    // When dropped, copies from `src` into `dest`.
+    struct InsertionHole<T> {
+        src: *mut T,
+        dest: *mut T,
+    }
 
-            if i != j {
-                let tmp = ptr::read(read_ptr);
-                ptr::copy(&*buf_v.offset(j), buf_v.offset(j + 1), (i - j) as usize);
-                ptr::copy_nonoverlapping(&tmp, buf_v.offset(j), 1);
-                mem::forget(tmp);
-            }
+    impl<T> Drop for InsertionHole<T> {
+        fn drop(&mut self) {
+            unsafe { ptr::copy_nonoverlapping(self.src, self.dest, 1); }
         }
     }
 }
 
-fn merge_sort<T, F>(v: &mut [T], mut compare: F)
-    where F: FnMut(&T, &T) -> Ordering
+/// Merges non-decreasing runs `v[..mid]` and `v[mid..]` using `buf` as temporary storage, and
+/// stores the result into `v[..]`.
+///
+/// # Safety
+///
+/// The two slices must be non-empty and `mid` must be in bounds. Buffer `buf` must be long enough
+/// to hold a copy of the shorter slice. Also, `T` must not be a zero-sized type.
+unsafe fn merge<T, F>(v: &mut [T], mid: usize, buf: *mut T, is_less: &mut F)
+    where F: FnMut(&T, &T) -> bool
 {
-    // warning: this wildly uses unsafe.
-    const BASE_INSERTION: usize = 32;
-    const LARGE_INSERTION: usize = 16;
-
-    // FIXME #12092: smaller insertion runs seems to make sorting
-    // vectors of large elements a little faster on some platforms,
-    // but hasn't been tested/tuned extensively
-    let insertion = if size_of::<T>() <= 16 {
-        BASE_INSERTION
-    } else {
-        LARGE_INSERTION
-    };
-
     let len = v.len();
+    let v = v.as_mut_ptr();
+    let v_mid = v.offset(mid as isize);
+    let v_end = v.offset(len as isize);
 
-    // short vectors get sorted in-place via insertion sort to avoid allocations
-    if len <= insertion {
-        insertion_sort(v, compare);
-        return;
-    }
+    // The merge process first copies the shorter run into `buf`. Then it traces the newly copied
+    // run and the longer run forwards (or backwards), comparing their next unconsumed elements and
+    // copying the lesser (or greater) one into `v`.
+    //
+    // As soon as the shorter run is fully consumed, the process is done. If the longer run gets
+    // consumed first, then we must copy whatever is left of the shorter run into the remaining
+    // hole in `v`.
+    //
+    // Intermediate state of the process is always tracked by `hole`, which serves two purposes:
+    // 1. Protects integrity of `v` from panics in `is_less`.
+    // 2. Fills the remaining hole in `v` if the longer run gets consumed first.
+    //
+    // Panic safety:
+    //
+    // If `is_less` panics at any point during the process, `hole` will get dropped and fill the
+    // hole in `v` with the unconsumed range in `buf`, thus ensuring that `v` still holds every
+    // object it initially held exactly once.
+    let mut hole;
 
-    // allocate some memory to use as scratch memory, we keep the
-    // length 0 so we can keep shallow copies of the contents of `v`
-    // without risking the dtors running on an object twice if
-    // `compare` panics.
-    let mut working_space = Vec::with_capacity(2 * len);
-    // these both are buffers of length `len`.
-    let mut buf_dat = working_space.as_mut_ptr();
-    let mut buf_tmp = unsafe { buf_dat.offset(len as isize) };
+    if mid <= len - mid {
+        // The left run is shorter.
+        ptr::copy_nonoverlapping(v, buf, mid);
+        hole = MergeHole {
+            start: buf,
+            end: buf.offset(mid as isize),
+            dest: v,
+        };
 
-    // length `len`.
-    let buf_v = v.as_ptr();
+        // Initially, these pointers point to the beginnings of their arrays.
+        let left = &mut hole.start;
+        let mut right = v_mid;
+        let out = &mut hole.dest;
 
-    // step 1. sort short runs with insertion sort. This takes the
-    // values from `v` and sorts them into `buf_dat`, leaving that
-    // with sorted runs of length INSERTION.
+        while *left < hole.end && right < v_end {
+            // Consume the lesser side.
+            // If equal, prefer the left run to maintain stability.
+            let to_copy = if is_less(&*right, &**left) {
+                get_and_increment(&mut right)
+            } else {
+                get_and_increment(left)
+            };
+            ptr::copy_nonoverlapping(to_copy, get_and_increment(out), 1);
+        }
+    } else {
+        // The right run is shorter.
+        ptr::copy_nonoverlapping(v_mid, buf, len - mid);
+        hole = MergeHole {
+            start: buf,
+            end: buf.offset((len - mid) as isize),
+            dest: v_mid,
+        };
 
-    // We could hardcode the sorting comparisons here, and we could
-    // manipulate/step the pointers themselves, rather than repeatedly
-    // .offset-ing.
-    for start in (0..len).step_by(insertion) {
-        // start <= i < len;
-        for i in start..cmp::min(start + insertion, len) {
-            // j satisfies: start <= j <= i;
-            let mut j = i as isize;
-            unsafe {
-                // `i` is in bounds.
-                let read_ptr = buf_v.offset(i as isize);
+        // Initially, these pointers point past the ends of their arrays.
+        let left = &mut hole.dest;
+        let right = &mut hole.end;
+        let mut out = v_end;
 
-                // find where to insert, we need to do strict <,
-                // rather than <=, to maintain stability.
-
-                // start <= j - 1 < len, so .offset(j - 1) is in
-                // bounds.
-                while j > start as isize && compare(&*read_ptr, &*buf_dat.offset(j - 1)) == Less {
-                    j -= 1;
-                }
-
-                // shift everything to the right, to make space to
-                // insert this value.
-
-                // j + 1 could be `len` (for the last `i`), but in
-                // that case, `i == j` so we don't copy. The
-                // `.offset(j)` is always in bounds.
-                ptr::copy(&*buf_dat.offset(j), buf_dat.offset(j + 1), i - j as usize);
-                ptr::copy_nonoverlapping(read_ptr, buf_dat.offset(j), 1);
-            }
+        while v < *left && buf < *right {
+            // Consume the greater side.
+            // If equal, prefer the right run to maintain stability.
+            let to_copy = if is_less(&*right.offset(-1), &*left.offset(-1)) {
+                decrement_and_get(left)
+            } else {
+                decrement_and_get(right)
+            };
+            ptr::copy_nonoverlapping(to_copy, decrement_and_get(&mut out), 1);
         }
     }
+    // Finally, `hole` gets dropped. If the shorter run was not fully consumed, whatever remains of
+    // it will now be copied into the hole in `v`.
 
-    // step 2. merge the sorted runs.
-    let mut width = insertion;
-    while width < len {
-        // merge the sorted runs of length `width` in `buf_dat` two at
-        // a time, placing the result in `buf_tmp`.
-
-        // 0 <= start <= len.
-        for start in (0..len).step_by(2 * width) {
-            // manipulate pointers directly for speed (rather than
-            // using a `for` loop with `range` and `.offset` inside
-            // that loop).
-            unsafe {
-                // the end of the first run & start of the
-                // second. Offset of `len` is defined, since this is
-                // precisely one byte past the end of the object.
-                let right_start = buf_dat.offset(cmp::min(start + width, len) as isize);
-                // end of the second. Similar reasoning to the above re safety.
-                let right_end_idx = cmp::min(start + 2 * width, len);
-                let right_end = buf_dat.offset(right_end_idx as isize);
-
-                // the pointers to the elements under consideration
-                // from the two runs.
-
-                // both of these are in bounds.
-                let mut left = buf_dat.offset(start as isize);
-                let mut right = right_start;
-
-                // where we're putting the results, it is a run of
-                // length `2*width`, so we step it once for each step
-                // of either `left` or `right`.  `buf_tmp` has length
-                // `len`, so these are in bounds.
-                let mut out = buf_tmp.offset(start as isize);
-                let out_end = buf_tmp.offset(right_end_idx as isize);
-
-                // If left[last] <= right[0], they are already in order:
-                // fast-forward the left side (the right side is handled
-                // in the loop).
-                // If `right` is not empty then left is not empty, and
-                // the offsets are in bounds.
-                if right != right_end && compare(&*right.offset(-1), &*right) != Greater {
-                    let elems = (right_start as usize - left as usize) / mem::size_of::<T>();
-                    ptr::copy_nonoverlapping(&*left, out, elems);
-                    out = out.offset(elems as isize);
-                    left = right_start;
-                }
-
-                while out < out_end {
-                    // Either the left or the right run are exhausted,
-                    // so just copy the remainder from the other run
-                    // and move on; this gives a huge speed-up (order
-                    // of 25%) for mostly sorted vectors (the best
-                    // case).
-                    if left == right_start {
-                        // the number remaining in this run.
-                        let elems = (right_end as usize - right as usize) / mem::size_of::<T>();
-                        ptr::copy_nonoverlapping(&*right, out, elems);
-                        break;
-                    } else if right == right_end {
-                        let elems = (right_start as usize - left as usize) / mem::size_of::<T>();
-                        ptr::copy_nonoverlapping(&*left, out, elems);
-                        break;
-                    }
-
-                    // check which side is smaller, and that's the
-                    // next element for the new run.
-
-                    // `left < right_start` and `right < right_end`,
-                    // so these are valid.
-                    let to_copy = if compare(&*left, &*right) == Greater {
-                        step(&mut right)
-                    } else {
-                        step(&mut left)
-                    };
-                    ptr::copy_nonoverlapping(&*to_copy, out, 1);
-                    step(&mut out);
-                }
-            }
-        }
-
-        mem::swap(&mut buf_dat, &mut buf_tmp);
-
-        width *= 2;
-    }
-
-    // write the result to `v` in one go, so that there are never two copies
-    // of the same object in `v`.
-    unsafe {
-        ptr::copy_nonoverlapping(&*buf_dat, v.as_mut_ptr(), len);
-    }
-
-    // increment the pointer, returning the old pointer.
-    #[inline(always)]
-    unsafe fn step<T>(ptr: &mut *mut T) -> *mut T {
+    unsafe fn get_and_increment<T>(ptr: &mut *mut T) -> *mut T {
         let old = *ptr;
         *ptr = ptr.offset(1);
         old
+    }
+
+    unsafe fn decrement_and_get<T>(ptr: &mut *mut T) -> *mut T {
+        *ptr = ptr.offset(-1);
+        *ptr
+    }
+
+    // When dropped, copies the range `start..end` into `dest..`.
+    struct MergeHole<T> {
+        start: *mut T,
+        end: *mut T,
+        dest: *mut T,
+    }
+
+    impl<T> Drop for MergeHole<T> {
+        fn drop(&mut self) {
+            // `T` is not a zero-sized type, so it's okay to divide by it's size.
+            let len = (self.end as usize - self.start as usize) / mem::size_of::<T>();
+            unsafe { ptr::copy_nonoverlapping(self.start, self.dest, len); }
+        }
+    }
+}
+
+/// This merge sort borrows some (but not all) ideas from TimSort, which is described in detail
+/// [here](http://svn.python.org/projects/python/trunk/Objects/listsort.txt).
+///
+/// The algorithm identifies strictly descending and non-descending subsequences, which are called
+/// natural runs. There is a stack of pending runs yet to be merged. Each newly found run is pushed
+/// onto the stack, and then some pairs of adjacent runs are merged until these two invariants are
+/// satisfied:
+///
+/// 1. for every `i` in `1..runs.len()`: `runs[i - 1].len > runs[i].len`
+/// 2. for every `i` in `2..runs.len()`: `runs[i - 2].len > runs[i - 1].len + runs[i].len`
+///
+/// The invariants ensure that the total running time is `O(n log n)` worst-case.
+fn merge_sort<T, F>(v: &mut [T], mut is_less: F)
+    where F: FnMut(&T, &T) -> bool
+{
+    // Slices of up to this length get sorted using insertion sort.
+    const MAX_INSERTION: usize = 20;
+    // Very short runs are extended using insertion sort to span at least this many elements.
+    const MIN_RUN: usize = 10;
+
+    // Sorting has no meaningful behavior on zero-sized types.
+    if size_of::<T>() == 0 {
+        return;
+    }
+
+    let len = v.len();
+
+    // Short arrays get sorted in-place via insertion sort to avoid allocations.
+    if len <= MAX_INSERTION {
+        if len >= 2 {
+            for i in (0..len-1).rev() {
+                insert_head(&mut v[i..], &mut is_less);
+            }
+        }
+        return;
+    }
+
+    // Allocate a buffer to use as scratch memory. We keep the length 0 so we can keep in it
+    // shallow copies of the contents of `v` without risking the dtors running on copies if
+    // `is_less` panics. When merging two sorted runs, this buffer holds a copy of the shorter run,
+    // which will always have length at most `len / 2`.
+    let mut buf = Vec::with_capacity(len / 2);
+
+    // In order to identify natural runs in `v`, we traverse it backwards. That might seem like a
+    // strange decision, but consider the fact that merges more often go in the opposite direction
+    // (forwards). According to benchmarks, merging forwards is slightly faster than merging
+    // backwards. To conclude, identifying runs by traversing backwards improves performance.
+    let mut runs = vec![];
+    let mut end = len;
+    while end > 0 {
+        // Find the next natural run, and reverse it if it's strictly descending.
+        let mut start = end - 1;
+        if start > 0 {
+            start -= 1;
+            unsafe {
+                if is_less(v.get_unchecked(start + 1), v.get_unchecked(start)) {
+                    while start > 0 && is_less(v.get_unchecked(start),
+                                               v.get_unchecked(start - 1)) {
+                        start -= 1;
+                    }
+                    v[start..end].reverse();
+                } else {
+                    while start > 0 && !is_less(v.get_unchecked(start),
+                                                v.get_unchecked(start - 1)) {
+                        start -= 1;
+                    }
+                }
+            }
+        }
+
+        // Insert some more elements into the run if it's too short. Insertion sort is faster than
+        // merge sort on short sequences, so this significantly improves performance.
+        while start > 0 && end - start < MIN_RUN {
+            start -= 1;
+            insert_head(&mut v[start..end], &mut is_less);
+        }
+
+        // Push this run onto the stack.
+        runs.push(Run {
+            start: start,
+            len: end - start,
+        });
+        end = start;
+
+        // Merge some pairs of adjacent runs to satisfy the invariants.
+        while let Some(r) = collapse(&runs) {
+            let left = runs[r + 1];
+            let right = runs[r];
+            unsafe {
+                merge(&mut v[left.start .. right.start + right.len], left.len, buf.as_mut_ptr(),
+                      &mut is_less);
+            }
+            runs[r] = Run {
+                start: left.start,
+                len: left.len + right.len,
+            };
+            runs.remove(r + 1);
+        }
+    }
+
+    // Finally, exactly one run must remain in the stack.
+    debug_assert!(runs.len() == 1 && runs[0].start == 0 && runs[0].len == len);
+
+    // Examines the stack of runs and identifies the next pair of runs to merge. More specifically,
+    // if `Some(r)` is returned, that means `runs[r]` and `runs[r + 1]` must be merged next. If the
+    // algorithm should continue building a new run instead, `None` is returned.
+    //
+    // TimSort is infamous for it's buggy implementations, as described here:
+    // http://envisage-project.eu/timsort-specification-and-verification/
+    //
+    // The gist of the story is: we must enforce the invariants on the top four runs on the stack.
+    // Enforcing them on just top three is not sufficient to ensure that the invariants will still
+    // hold for *all* runs in the stack.
+    //
+    // This function correctly checks invariants for the top four runs. Additionally, if the top
+    // run starts at index 0, it will always demand a merge operation until the stack is fully
+    // collapsed, in order to complete the sort.
+    #[inline]
+    fn collapse(runs: &[Run]) -> Option<usize> {
+        let n = runs.len();
+        if n >= 2 && (runs[n - 1].start == 0 ||
+                      runs[n - 2].len <= runs[n - 1].len ||
+                      (n >= 3 && runs[n - 3].len <= runs[n - 2].len + runs[n - 1].len) ||
+                      (n >= 4 && runs[n - 4].len <= runs[n - 3].len + runs[n - 2].len)) {
+            if n >= 3 && runs[n - 3].len < runs[n - 1].len {
+                Some(n - 3)
+            } else {
+                Some(n - 2)
+            }
+        } else {
+            None
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct Run {
+        start: usize,
+        len: usize,
     }
 }

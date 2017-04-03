@@ -10,6 +10,7 @@
 
 // ignore-bitrig
 // compile-flags: -C codegen-units=3
+// ignore-emscripten no threads support
 
 // Test unwinding through multiple compilation units.
 
@@ -38,5 +39,5 @@ mod b {
 }
 
 fn main() {
-    thread::spawn(move|| { ::b::g() }).join().err().unwrap();
+    thread::spawn(move|| { ::b::g() }).join().unwrap_err();
 }

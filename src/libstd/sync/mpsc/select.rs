@@ -58,6 +58,8 @@
             issue = "27800")]
 
 
+use fmt;
+
 use core::cell::{Cell, UnsafeCell};
 use core::marker;
 use core::ptr;
@@ -101,7 +103,7 @@ pub struct Handle<'rx, T:Send+'rx> {
 struct Packets { cur: *mut Handle<'static, ()> }
 
 #[doc(hidden)]
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub enum StartResult {
     Installed,
     Abort,
@@ -350,11 +352,21 @@ impl Iterator for Packets {
     }
 }
 
-#[cfg(test)]
-#[allow(unused_imports)]
-mod tests {
-    use prelude::v1::*;
+impl fmt::Debug for Select {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Select {{ .. }}")
+    }
+}
 
+impl<'rx, T:Send+'rx> fmt::Debug for Handle<'rx, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Handle {{ .. }}")
+    }
+}
+
+#[allow(unused_imports)]
+#[cfg(all(test, not(target_os = "emscripten")))]
+mod tests {
     use thread;
     use sync::mpsc::*;
 
@@ -761,5 +773,19 @@ mod tests {
                 assert_eq!(rx1.recv().unwrap(), 1);
             }
         }
+    }
+
+    #[test]
+    fn fmt_debug_select() {
+        let sel = Select::new();
+        assert_eq!(format!("{:?}", sel), "Select { .. }");
+    }
+
+    #[test]
+    fn fmt_debug_handle() {
+        let (_, rx) = channel::<i32>();
+        let sel = Select::new();
+        let handle = sel.handle(&rx);
+        assert_eq!(format!("{:?}", handle), "Handle { .. }");
     }
 }

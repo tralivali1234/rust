@@ -16,6 +16,8 @@ fn f() {
             }
         }
     }
+
+    loop { 'w: while break 'w { } }
 }
 
 fn main() {}

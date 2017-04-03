@@ -17,14 +17,18 @@
 //! internally. The `IndependentSample` trait is for generating values
 //! that do not need to record state.
 
+use core::fmt;
+
+#[cfg(not(test))] // only necessary for no_std
 use core::num::Float;
+
 use core::marker::PhantomData;
 
-use {Rng, Rand};
+use {Rand, Rng};
 
 pub use self::range::Range;
-pub use self::gamma::{Gamma, ChiSquared, FisherF, StudentT};
-pub use self::normal::{Normal, LogNormal};
+pub use self::gamma::{ChiSquared, FisherF, Gamma, StudentT};
+pub use self::normal::{LogNormal, Normal};
 pub use self::exponential::Exp;
 
 pub mod range;
@@ -76,12 +80,27 @@ impl<Sup: Rand> IndependentSample<Sup> for RandSample<Sup> {
     }
 }
 
+impl<Sup> fmt::Debug for RandSample<Sup> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("RandSample { .. }")
+    }
+}
+
 /// A value with a particular weight for use with `WeightedChoice`.
 pub struct Weighted<T> {
     /// The numerical weight of this item
     pub weight: usize,
     /// The actual item which is being weighted
     pub item: T,
+}
+
+impl<T: fmt::Debug> fmt::Debug for Weighted<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Weighted")
+         .field("weight", &self.weight)
+         .field("item", &self.item)
+         .finish()
+    }
 }
 
 /// A distribution that selects from a finite collection of weighted items.
@@ -187,6 +206,15 @@ impl<'a, T: Clone> IndependentSample<T> for WeightedChoice<'a, T> {
     }
 }
 
+impl<'a, T: fmt::Debug> fmt::Debug for WeightedChoice<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("WeightedChoice")
+         .field("items", &self.items)
+         .field("weight_range", &self.weight_range)
+         .finish()
+    }
+}
+
 mod ziggurat_tables;
 
 /// Sample a random number using the Ziggurat method (specifically the
@@ -235,18 +263,10 @@ fn ziggurat<R: Rng, P, Z>(rng: &mut R,
 
         // u is either U(-1, 1) or U(0, 1) depending on if this is a
         // symmetric distribution or not.
-        let u = if symmetric {
-            2.0 * f - 1.0
-        } else {
-            f
-        };
+        let u = if symmetric { 2.0 * f - 1.0 } else { f };
         let x = u * x_tab[i];
 
-        let test_x = if symmetric {
-            x.abs()
-        } else {
-            x
-        };
+        let test_x = if symmetric { x.abs() } else { x };
 
         // algebraically equivalent to |u| < x_tab[i+1]/x_tab[i] (or u < x_tab[i+1]/x_tab[i])
         if test_x < x_tab[i + 1] {
@@ -264,8 +284,8 @@ fn ziggurat<R: Rng, P, Z>(rng: &mut R,
 
 #[cfg(test)]
 mod tests {
-    use {Rng, Rand};
-    use super::{RandSample, WeightedChoice, Weighted, Sample, IndependentSample};
+    use {Rand, Rng};
+    use super::{IndependentSample, RandSample, Sample, Weighted, WeightedChoice};
 
     #[derive(PartialEq, Debug)]
     struct ConstRand(usize);
@@ -318,37 +338,37 @@ mod tests {
             }}
         }
 
-        t!(vec!(Weighted { weight: 1, item: 10 }),
+        t!(vec![Weighted { weight: 1, item: 10 }],
            [10]);
 
         // skip some
-        t!(vec!(Weighted { weight: 0, item: 20 },
+        t!(vec![Weighted { weight: 0, item: 20 },
                 Weighted { weight: 2, item: 21 },
                 Weighted { weight: 0, item: 22 },
-                Weighted { weight: 1, item: 23 }),
+                Weighted { weight: 1, item: 23 }],
            [21, 21, 23]);
 
         // different weights
-        t!(vec!(Weighted { weight: 4, item: 30 },
-                Weighted { weight: 3, item: 31 }),
+        t!(vec![Weighted { weight: 4, item: 30 },
+                Weighted { weight: 3, item: 31 }],
            [30, 30, 30, 30, 31, 31, 31]);
 
         // check that we're binary searching
         // correctly with some vectors of odd
         // length.
-        t!(vec!(Weighted { weight: 1, item: 40 },
+        t!(vec![Weighted { weight: 1, item: 40 },
                 Weighted { weight: 1, item: 41 },
                 Weighted { weight: 1, item: 42 },
                 Weighted { weight: 1, item: 43 },
-                Weighted { weight: 1, item: 44 }),
+                Weighted { weight: 1, item: 44 }],
            [40, 41, 42, 43, 44]);
-        t!(vec!(Weighted { weight: 1, item: 50 },
+        t!(vec![Weighted { weight: 1, item: 50 },
                 Weighted { weight: 1, item: 51 },
                 Weighted { weight: 1, item: 52 },
                 Weighted { weight: 1, item: 53 },
                 Weighted { weight: 1, item: 54 },
                 Weighted { weight: 1, item: 55 },
-                Weighted { weight: 1, item: 56 }),
+                Weighted { weight: 1, item: 56 }],
            [50, 51, 52, 53, 54, 55, 56]);
     }
 

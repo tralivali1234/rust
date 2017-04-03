@@ -8,21 +8,34 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use prelude::v1::*;
 use io::prelude::*;
 
 use fmt;
 use io;
 use net::{ToSocketAddrs, SocketAddr, Shutdown};
-use sys_common::io::read_to_end_uninitialized;
 use sys_common::net as net_imp;
 use sys_common::{AsInner, FromInner, IntoInner};
 use time::Duration;
 
-/// A structure which represents a TCP stream between a local socket and a
-/// remote socket.
+/// A TCP stream between a local and a remote socket.
 ///
-/// The socket will be closed when the value is dropped.
+/// After creating a `TcpStream` by either [`connect`]ing to a remote host or
+/// [`accept`]ing a connection on a [`TcpListener`], data can be transmitted
+/// by [reading] and [writing] to it.
+///
+/// The connection will be closed when the value is dropped. The reading and writing
+/// portions of the connection can also be shut down individually with the [`shutdown`]
+/// method.
+///
+/// The Transmission Control Protocol is specified in [IETF RFC 793].
+///
+/// [`accept`]: ../../std/net/struct.TcpListener.html#method.accept
+/// [`connect`]: #method.connect
+/// [IETF RFC 793]: https://tools.ietf.org/html/rfc793
+/// [reading]: ../../std/io/trait.Read.html
+/// [`shutdown`]: #method.shutdown
+/// [`TcpListener`]: ../../std/net/struct.TcpListener.html
+/// [writing]: ../../std/io/trait.Write.html
 ///
 /// # Examples
 ///
@@ -41,13 +54,26 @@ use time::Duration;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct TcpStream(net_imp::TcpStream);
 
-/// A structure representing a socket server.
+/// A TCP socket server, listening for connections.
+///
+/// After creating a `TcpListener` by [`bind`]ing it to a socket address, it listens
+/// for incoming TCP connections. These can be accepted by calling [`accept`] or by
+/// iterating over the [`Incoming`] iterator returned by [`incoming`].
+///
+/// The socket will be closed when the value is dropped.
+///
+/// The Transmission Control Protocol is specified in [IETF RFC 793].
+///
+/// [`accept`]: #method.accept
+/// [`bind`]: #method.bind
+/// [IETF RFC 793]: https://tools.ietf.org/html/rfc793
+/// [`Incoming`]: ../../std/net/struct.Incoming.html
+/// [`incoming`]: #method.incoming
 ///
 /// # Examples
 ///
 /// ```no_run
 /// use std::net::{TcpListener, TcpStream};
-/// use std::thread;
 ///
 /// let listener = TcpListener::bind("127.0.0.1:80").unwrap();
 ///
@@ -55,50 +81,89 @@ pub struct TcpStream(net_imp::TcpStream);
 ///     // ...
 /// }
 ///
-/// // accept connections and process them, spawning a new thread for each one
+/// // accept connections and process them serially
 /// for stream in listener.incoming() {
 ///     match stream {
 ///         Ok(stream) => {
-///             thread::spawn(move|| {
-///                 // connection succeeded
-///                 handle_client(stream)
-///             });
+///             handle_client(stream);
 ///         }
 ///         Err(e) => { /* connection failed */ }
 ///     }
 /// }
-///
-/// // close the socket server
-/// drop(listener);
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct TcpListener(net_imp::TcpListener);
 
-/// An infinite iterator over the connections from a `TcpListener`.
+/// An iterator that infinitely [`accept`]s connections on a [`TcpListener`].
 ///
-/// This iterator will infinitely yield `Some` of the accepted connections. It
-/// is equivalent to calling `accept` in a loop.
+/// This `struct` is created by the [`incoming`] method on [`TcpListener`].
+/// See its documentation for more.
+///
+/// [`accept`]: ../../std/net/struct.TcpListener.html#method.accept
+/// [`incoming`]: ../../std/net/struct.TcpListener.html#method.incoming
+/// [`TcpListener`]: ../../std/net/struct.TcpListener.html
 #[stable(feature = "rust1", since = "1.0.0")]
+#[derive(Debug)]
 pub struct Incoming<'a> { listener: &'a TcpListener }
 
 impl TcpStream {
     /// Opens a TCP connection to a remote host.
     ///
     /// `addr` is an address of the remote host. Anything which implements
-    /// `ToSocketAddrs` trait can be supplied for the address; see this trait
+    /// [`ToSocketAddrs`] trait can be supplied for the address; see this trait
     /// documentation for concrete examples.
+    /// In case [`ToSocketAddrs::to_socket_addrs()`] returns more than one entry,
+    /// then the first valid and reachable address is used.
+    ///
+    /// [`ToSocketAddrs`]: ../../std/net/trait.ToSocketAddrs.html
+    /// [`ToSocketAddrs::to_socket_addrs()`]:
+    /// ../../std/net/trait.ToSocketAddrs.html#tymethod.to_socket_addrs
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// if let Ok(stream) = TcpStream::connect("127.0.0.1:8080") {
+    ///     println!("Connected to the server!");
+    /// } else {
+    ///     println!("Couldn't connect to server...");
+    /// }
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn connect<A: ToSocketAddrs>(addr: A) -> io::Result<TcpStream> {
         super::each_addr(addr, net_imp::TcpStream::connect).map(TcpStream)
     }
 
     /// Returns the socket address of the remote peer of this TCP connection.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// assert_eq!(stream.peer_addr().unwrap(),
+    ///            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080)));
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn peer_addr(&self) -> io::Result<SocketAddr> {
         self.0.peer_addr()
     }
 
     /// Returns the socket address of the local half of this TCP connection.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// assert_eq!(stream.local_addr().unwrap(),
+    ///            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080)));
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.0.socket_addr()
@@ -108,7 +173,19 @@ impl TcpStream {
     ///
     /// This function will cause all pending and future I/O on the specified
     /// portions to return immediately with an appropriate value (see the
-    /// documentation of `Shutdown`).
+    /// documentation of [`Shutdown`]).
+    ///
+    /// [`Shutdown`]: ../../std/net/enum.Shutdown.html
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::{Shutdown, TcpStream};
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.shutdown(Shutdown::Both).expect("shutdown call failed");
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn shutdown(&self, how: Shutdown) -> io::Result<()> {
         self.0.shutdown(how)
@@ -120,6 +197,16 @@ impl TcpStream {
     /// object references. Both handles will read and write the same stream of
     /// data, and options set on one stream will be propagated to the other
     /// stream.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// let stream_clone = stream.try_clone().expect("clone failed...");
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn try_clone(&self) -> io::Result<TcpStream> {
         self.0.duplicate().map(TcpStream)
@@ -127,7 +214,7 @@ impl TcpStream {
 
     /// Sets the read timeout to the timeout specified.
     ///
-    /// If the value specified is `None`, then `read` calls will block
+    /// If the value specified is [`None`], then [`read`] calls will block
     /// indefinitely. It is an error to pass the zero `Duration` to this
     /// method.
     ///
@@ -135,7 +222,22 @@ impl TcpStream {
     ///
     /// Platforms may return a different error code whenever a read times out as
     /// a result of setting this option. For example Unix typically returns an
-    /// error of the kind `WouldBlock`, but Windows may return `TimedOut`.
+    /// error of the kind [`WouldBlock`], but Windows may return [`TimedOut`].
+    ///
+    /// [`None`]: ../../std/option/enum.Option.html#variant.None
+    /// [`read`]: ../../std/io/trait.Read.html#tymethod.read
+    /// [`WouldBlock`]: ../../std/io/enum.ErrorKind.html#variant.WouldBlock
+    /// [`TimedOut`]: ../../std/io/enum.ErrorKind.html#variant.TimedOut
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_read_timeout(None).expect("set_read_timeout call failed");
+    /// ```
     #[stable(feature = "socket_timeout", since = "1.4.0")]
     pub fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         self.0.set_read_timeout(dur)
@@ -143,15 +245,31 @@ impl TcpStream {
 
     /// Sets the write timeout to the timeout specified.
     ///
-    /// If the value specified is `None`, then `write` calls will block
-    /// indefinitely. It is an error to pass the zero `Duration` to this
+    /// If the value specified is [`None`], then [`write`] calls will block
+    /// indefinitely. It is an error to pass the zero [`Duration`] to this
     /// method.
     ///
     /// # Note
     ///
     /// Platforms may return a different error code whenever a write times out
     /// as a result of setting this option. For example Unix typically returns
-    /// an error of the kind `WouldBlock`, but Windows may return `TimedOut`.
+    /// an error of the kind [`WouldBlock`], but Windows may return [`TimedOut`].
+    ///
+    /// [`None`]: ../../std/option/enum.Option.html#variant.None
+    /// [`write`]: ../../std/io/trait.Write.html#tymethod.write
+    /// [`Duration`]: ../../std/time/struct.Duration.html
+    /// [`WouldBlock`]: ../../std/io/enum.ErrorKind.html#variant.WouldBlock
+    /// [`TimedOut`]: ../../std/io/enum.ErrorKind.html#variant.TimedOut
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_write_timeout(None).expect("set_write_timeout call failed");
+    /// ```
     #[stable(feature = "socket_timeout", since = "1.4.0")]
     pub fn set_write_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
         self.0.set_write_timeout(dur)
@@ -159,11 +277,25 @@ impl TcpStream {
 
     /// Returns the read timeout of this socket.
     ///
-    /// If the timeout is `None`, then `read` calls will block indefinitely.
+    /// If the timeout is [`None`], then [`read`] calls will block indefinitely.
     ///
     /// # Note
     ///
     /// Some platforms do not provide access to the current timeout.
+    ///
+    /// [`None`]: ../../std/option/enum.Option.html#variant.None
+    /// [`read`]: ../../std/io/trait.Read.html#tymethod.read
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_read_timeout(None).expect("set_read_timeout call failed");
+    /// assert_eq!(stream.read_timeout().unwrap(), None);
+    /// ```
     #[stable(feature = "socket_timeout", since = "1.4.0")]
     pub fn read_timeout(&self) -> io::Result<Option<Duration>> {
         self.0.read_timeout()
@@ -171,14 +303,173 @@ impl TcpStream {
 
     /// Returns the write timeout of this socket.
     ///
-    /// If the timeout is `None`, then `write` calls will block indefinitely.
+    /// If the timeout is [`None`], then [`write`] calls will block indefinitely.
     ///
     /// # Note
     ///
     /// Some platforms do not provide access to the current timeout.
+    ///
+    /// [`None`]: ../../std/option/enum.Option.html#variant.None
+    /// [`write`]: ../../std/io/trait.Write.html#tymethod.write
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_write_timeout(None).expect("set_write_timeout call failed");
+    /// assert_eq!(stream.write_timeout().unwrap(), None);
+    /// ```
     #[stable(feature = "socket_timeout", since = "1.4.0")]
     pub fn write_timeout(&self) -> io::Result<Option<Duration>> {
         self.0.write_timeout()
+    }
+
+    /// Receives data on the socket from the remote adress to which it is
+    /// connected, without removing that data from the queue. On success,
+    /// returns the number of bytes peeked.
+    ///
+    /// Successive calls return the same data. This is accomplished by passing
+    /// `MSG_PEEK` as a flag to the underlying `recv` system call.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// #![feature(peek)]
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8000")
+    ///                        .expect("couldn't bind to address");
+    /// let mut buf = [0; 10];
+    /// let len = stream.peek(&mut buf).expect("peek failed");
+    /// ```
+    #[unstable(feature = "peek", issue = "38980")]
+    pub fn peek(&self, buf: &mut [u8]) -> io::Result<usize> {
+        self.0.peek(buf)
+    }
+
+    /// Sets the value of the `TCP_NODELAY` option on this socket.
+    ///
+    /// If set, this option disables the Nagle algorithm. This means that
+    /// segments are always sent as soon as possible, even if there is only a
+    /// small amount of data. When not set, data is buffered until there is a
+    /// sufficient amount to send out, thereby avoiding the frequent sending of
+    /// small packets.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_nodelay(true).expect("set_nodelay call failed");
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+        self.0.set_nodelay(nodelay)
+    }
+
+    /// Gets the value of the `TCP_NODELAY` option on this socket.
+    ///
+    /// For more information about this option, see [`set_nodelay`][link].
+    ///
+    /// [link]: #method.set_nodelay
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_nodelay(true).expect("set_nodelay call failed");
+    /// assert_eq!(stream.nodelay().unwrap_or(false), true);
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn nodelay(&self) -> io::Result<bool> {
+        self.0.nodelay()
+    }
+
+    /// Sets the value for the `IP_TTL` option on this socket.
+    ///
+    /// This value sets the time-to-live field that is used in every packet sent
+    /// from this socket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_ttl(100).expect("set_ttl call failed");
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        self.0.set_ttl(ttl)
+    }
+
+    /// Gets the value of the `IP_TTL` option for this socket.
+    ///
+    /// For more information about this option, see [`set_ttl`][link].
+    ///
+    /// [link]: #method.set_ttl
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_ttl(100).expect("set_ttl call failed");
+    /// assert_eq!(stream.ttl().unwrap_or(0), 100);
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn ttl(&self) -> io::Result<u32> {
+        self.0.ttl()
+    }
+
+    /// Get the value of the `SO_ERROR` option on this socket.
+    ///
+    /// This will retrieve the stored error in the underlying socket, clearing
+    /// the field in the process. This can be useful for checking errors between
+    /// calls.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.take_error().expect("No error was expected...");
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
+        self.0.take_error()
+    }
+
+    /// Moves this TCP stream into or out of nonblocking mode.
+    ///
+    /// On Unix this corresponds to calling fcntl, and on Windows this
+    /// corresponds to calling ioctlsocket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpStream;
+    ///
+    /// let stream = TcpStream::connect("127.0.0.1:8080")
+    ///                        .expect("Couldn't connect to the server...");
+    /// stream.set_nonblocking(true).expect("set_nonblocking call failed");
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        self.0.set_nonblocking(nonblocking)
     }
 }
 
@@ -186,7 +477,7 @@ impl TcpStream {
 impl Read for TcpStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.0.read(buf) }
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-        unsafe { read_to_end_uninitialized(self, buf) }
+        self.0.read_to_end(buf)
     }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -198,7 +489,7 @@ impl Write for TcpStream {
 impl<'a> Read for &'a TcpStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.0.read(buf) }
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-        unsafe { read_to_end_uninitialized(self, buf) }
+        self.0.read_to_end(buf)
     }
 }
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -234,16 +525,37 @@ impl TcpListener {
     ///
     /// Binding with a port number of 0 will request that the OS assigns a port
     /// to this listener. The port allocated can be queried via the
-    /// `local_addr` method.
+    /// [`local_addr`] method.
     ///
-    /// The address type can be any implementor of `ToSocketAddrs` trait. See
+    /// The address type can be any implementor of [`ToSocketAddrs`] trait. See
     /// its documentation for concrete examples.
+    ///
+    /// [`local_addr`]: #method.local_addr
+    /// [`ToSocketAddrs`]: ../../std/net/trait.ToSocketAddrs.html
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpListener;
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:80").unwrap();
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn bind<A: ToSocketAddrs>(addr: A) -> io::Result<TcpListener> {
         super::each_addr(addr, net_imp::TcpListener::bind).map(TcpListener)
     }
 
     /// Returns the local socket address of this listener.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    /// assert_eq!(listener.local_addr().unwrap(),
+    ///            SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 8080)));
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn local_addr(&self) -> io::Result<SocketAddr> {
         self.0.socket_addr()
@@ -251,9 +563,20 @@ impl TcpListener {
 
     /// Creates a new independently owned handle to the underlying socket.
     ///
-    /// The returned `TcpListener` is a reference to the same socket that this
+    /// The returned [`TcpListener`] is a reference to the same socket that this
     /// object references. Both handles can be used to accept incoming
     /// connections and options set on one listener will affect the other.
+    ///
+    /// [`TcpListener`]: ../../std/net/struct.TcpListener.html
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpListener;
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    /// let listener_clone = listener.try_clone().unwrap();
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn try_clone(&self) -> io::Result<TcpListener> {
         self.0.duplicate().map(TcpListener)
@@ -262,8 +585,22 @@ impl TcpListener {
     /// Accept a new incoming connection from this listener.
     ///
     /// This function will block the calling thread until a new TCP connection
-    /// is established. When established, the corresponding `TcpStream` and the
+    /// is established. When established, the corresponding [`TcpStream`] and the
     /// remote peer's address will be returned.
+    ///
+    /// [`TcpStream`]: ../../std/net/struct.TcpStream.html
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpListener;
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:8080").unwrap();
+    /// match listener.accept() {
+    ///     Ok((_socket, addr)) => println!("new client: {:?}", addr),
+    ///     Err(e) => println!("couldn't get client: {:?}", e),
+    /// }
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn accept(&self) -> io::Result<(TcpStream, SocketAddr)> {
         self.0.accept().map(|(a, b)| (TcpStream(a), b))
@@ -272,11 +609,124 @@ impl TcpListener {
     /// Returns an iterator over the connections being received on this
     /// listener.
     ///
-    /// The returned iterator will never return `None` and will also not yield
-    /// the peer's `SocketAddr` structure.
+    /// The returned iterator will never return [`None`] and will also not yield
+    /// the peer's [`SocketAddr`] structure. Iterating over it is equivalent to
+    /// calling [`accept`] in a loop.
+    ///
+    /// [`None`]: ../../std/option/enum.Option.html#variant.None
+    /// [`SocketAddr`]: ../../std/net/enum.SocketAddr.html
+    /// [`accept`]: #method.accept
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpListener;
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:80").unwrap();
+    ///
+    /// for stream in listener.incoming() {
+    ///     match stream {
+    ///         Ok(stream) => {
+    ///             println!("new client!");
+    ///         }
+    ///         Err(e) => { /* connection failed */ }
+    ///     }
+    /// }
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn incoming(&self) -> Incoming {
         Incoming { listener: self }
+    }
+
+    /// Sets the value for the `IP_TTL` option on this socket.
+    ///
+    /// This value sets the time-to-live field that is used in every packet sent
+    /// from this socket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpListener;
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:80").unwrap();
+    /// listener.set_ttl(100).expect("could not set TTL");
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn set_ttl(&self, ttl: u32) -> io::Result<()> {
+        self.0.set_ttl(ttl)
+    }
+
+    /// Gets the value of the `IP_TTL` option for this socket.
+    ///
+    /// For more information about this option, see [`set_ttl`][link].
+    ///
+    /// [link]: #method.set_ttl
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpListener;
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:80").unwrap();
+    /// listener.set_ttl(100).expect("could not set TTL");
+    /// assert_eq!(listener.ttl().unwrap_or(0), 100);
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn ttl(&self) -> io::Result<u32> {
+        self.0.ttl()
+    }
+
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    #[rustc_deprecated(since = "1.16.0",
+                       reason = "this option can only be set before the socket is bound")]
+    #[allow(missing_docs)]
+    pub fn set_only_v6(&self, only_v6: bool) -> io::Result<()> {
+        self.0.set_only_v6(only_v6)
+    }
+
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    #[rustc_deprecated(since = "1.16.0",
+                       reason = "this option can only be set before the socket is bound")]
+    #[allow(missing_docs)]
+    pub fn only_v6(&self) -> io::Result<bool> {
+        self.0.only_v6()
+    }
+
+    /// Get the value of the `SO_ERROR` option on this socket.
+    ///
+    /// This will retrieve the stored error in the underlying socket, clearing
+    /// the field in the process. This can be useful for checking errors between
+    /// calls.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpListener;
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:80").unwrap();
+    /// listener.take_error().expect("No error was expected");
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn take_error(&self) -> io::Result<Option<io::Error>> {
+        self.0.take_error()
+    }
+
+    /// Moves this TCP stream into or out of nonblocking mode.
+    ///
+    /// On Unix this corresponds to calling fcntl, and on Windows this
+    /// corresponds to calling ioctlsocket.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::net::TcpListener;
+    ///
+    /// let listener = TcpListener::bind("127.0.0.1:80").unwrap();
+    /// listener.set_nonblocking(true).expect("Cannot set non-blocking");
+    /// ```
+    #[stable(feature = "net2_mutators", since = "1.9.0")]
+    pub fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()> {
+        self.0.set_nonblocking(nonblocking)
     }
 }
 
@@ -309,17 +759,15 @@ impl fmt::Debug for TcpListener {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "emscripten")))]
 mod tests {
-    use prelude::v1::*;
-
     use io::ErrorKind;
     use io::prelude::*;
     use net::*;
     use net::test::{next_test_ip4, next_test_ip6};
     use sync::mpsc::channel;
     use sys_common::AsInner;
-    use time::Duration;
+    use time::{Instant, Duration};
     use thread;
 
     fn each_ip(f: &mut FnMut(SocketAddr)) {
@@ -768,6 +1216,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)] // test doesn't work on Windows, see #31657
     fn close_read_wakes_up() {
         each_ip(&mut |addr| {
             let a = t!(TcpListener::bind(&addr));
@@ -929,6 +1378,7 @@ mod tests {
 
         t!(stream.set_write_timeout(None));
         assert_eq!(None, t!(stream.write_timeout()));
+        drop(listener);
     }
 
     #[test]
@@ -940,11 +1390,11 @@ mod tests {
         t!(stream.set_read_timeout(Some(Duration::from_millis(1000))));
 
         let mut buf = [0; 10];
-        let wait = Duration::span(|| {
-            let kind = stream.read(&mut buf).err().expect("expected error").kind();
-            assert!(kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut);
-        });
-        assert!(wait > Duration::from_millis(400));
+        let start = Instant::now();
+        let kind = stream.read(&mut buf).err().expect("expected error").kind();
+        assert!(kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut);
+        assert!(start.elapsed() > Duration::from_millis(400));
+        drop(listener);
     }
 
     #[test]
@@ -962,10 +1412,92 @@ mod tests {
         t!(stream.read(&mut buf));
         assert_eq!(b"hello world", &buf[..]);
 
-        let wait = Duration::span(|| {
-            let kind = stream.read(&mut buf).err().expect("expected error").kind();
-            assert!(kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut);
-        });
-        assert!(wait > Duration::from_millis(400));
+        let start = Instant::now();
+        let kind = stream.read(&mut buf).err().expect("expected error").kind();
+        assert!(kind == ErrorKind::WouldBlock || kind == ErrorKind::TimedOut);
+        assert!(start.elapsed() > Duration::from_millis(400));
+        drop(listener);
+    }
+
+    #[test]
+    fn nodelay() {
+        let addr = next_test_ip4();
+        let _listener = t!(TcpListener::bind(&addr));
+
+        let stream = t!(TcpStream::connect(&("localhost", addr.port())));
+
+        assert_eq!(false, t!(stream.nodelay()));
+        t!(stream.set_nodelay(true));
+        assert_eq!(true, t!(stream.nodelay()));
+        t!(stream.set_nodelay(false));
+        assert_eq!(false, t!(stream.nodelay()));
+    }
+
+    #[test]
+    fn ttl() {
+        let ttl = 100;
+
+        let addr = next_test_ip4();
+        let listener = t!(TcpListener::bind(&addr));
+
+        t!(listener.set_ttl(ttl));
+        assert_eq!(ttl, t!(listener.ttl()));
+
+        let stream = t!(TcpStream::connect(&("localhost", addr.port())));
+
+        t!(stream.set_ttl(ttl));
+        assert_eq!(ttl, t!(stream.ttl()));
+    }
+
+    #[test]
+    fn set_nonblocking() {
+        let addr = next_test_ip4();
+        let listener = t!(TcpListener::bind(&addr));
+
+        t!(listener.set_nonblocking(true));
+        t!(listener.set_nonblocking(false));
+
+        let mut stream = t!(TcpStream::connect(&("localhost", addr.port())));
+
+        t!(stream.set_nonblocking(false));
+        t!(stream.set_nonblocking(true));
+
+        let mut buf = [0];
+        match stream.read(&mut buf) {
+            Ok(_) => panic!("expected error"),
+            Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+            Err(e) => panic!("unexpected error {}", e),
+        }
+    }
+
+    #[test]
+    fn peek() {
+        each_ip(&mut |addr| {
+            let (txdone, rxdone) = channel();
+
+            let srv = t!(TcpListener::bind(&addr));
+            let _t = thread::spawn(move|| {
+                let mut cl = t!(srv.accept()).0;
+                cl.write(&[1,3,3,7]).unwrap();
+                t!(rxdone.recv());
+            });
+
+            let mut c = t!(TcpStream::connect(&addr));
+            let mut b = [0; 10];
+            for _ in 1..3 {
+                let len = c.peek(&mut b).unwrap();
+                assert_eq!(len, 4);
+            }
+            let len = c.read(&mut b).unwrap();
+            assert_eq!(len, 4);
+
+            t!(c.set_nonblocking(true));
+            match c.peek(&mut b) {
+                Ok(_) => panic!("expected error"),
+                Err(ref e) if e.kind() == ErrorKind::WouldBlock => {}
+                Err(e) => panic!("unexpected error {}", e),
+            }
+            t!(txdone.send(()));
+        })
     }
 }

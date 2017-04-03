@@ -23,9 +23,9 @@
 # Since this should not require frequent updates, we just store this
 # out-of-line and check the unicode.rs file into git.
 
-import fileinput, re, os, sys, operator
+import fileinput, re, os, sys, operator, math
 
-preamble = '''// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
+preamble = '''// Copyright 2012-2016 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -79,28 +79,28 @@ def load_unicode_data(f):
     canon_decomp = {}
     compat_decomp = {}
 
-    udict = {};
-    range_start = -1;
+    udict = {}
+    range_start = -1
     for line in fileinput.input(f):
-        data = line.split(';');
+        data = line.split(';')
         if len(data) != 15:
             continue
-        cp = int(data[0], 16);
+        cp = int(data[0], 16)
         if is_surrogate(cp):
             continue
         if range_start >= 0:
             for i in xrange(range_start, cp):
-                udict[i] = data;
-            range_start = -1;
+                udict[i] = data
+            range_start = -1
         if data[1].endswith(", First>"):
-            range_start = cp;
-            continue;
-        udict[cp] = data;
+            range_start = cp
+            continue
+        udict[cp] = data
 
     for code in udict:
-        [code_org, name, gencat, combine, bidi,
+        (code_org, name, gencat, combine, bidi,
          decomp, deci, digit, num, mirror,
-         old, iso, upcase, lowcase, titlecase ] = udict[code];
+         old, iso, upcase, lowcase, titlecase) = udict[code]
 
         # generate char to char direct common and simple conversions
         # uppercase to lowercase
@@ -271,43 +271,6 @@ def load_properties(f, interestingprops):
 
     return props
 
-# load all widths of want_widths, except those in except_cats
-def load_east_asian_width(want_widths, except_cats):
-    f = "EastAsianWidth.txt"
-    fetch(f)
-    widths = {}
-    re1 = re.compile("^([0-9A-F]+);(\w+) +# (\w+)")
-    re2 = re.compile("^([0-9A-F]+)\.\.([0-9A-F]+);(\w+) +# (\w+)")
-
-    for line in fileinput.input(f):
-        width = None
-        d_lo = 0
-        d_hi = 0
-        cat = None
-        m = re1.match(line)
-        if m:
-            d_lo = m.group(1)
-            d_hi = m.group(1)
-            width = m.group(2)
-            cat = m.group(3)
-        else:
-            m = re2.match(line)
-            if m:
-                d_lo = m.group(1)
-                d_hi = m.group(2)
-                width = m.group(3)
-                cat = m.group(4)
-            else:
-                continue
-        if cat in except_cats or width not in want_widths:
-            continue
-        d_lo = int(d_lo, 16)
-        d_hi = int(d_hi, 16)
-        if width not in widths:
-            widths[width] = []
-        widths[width].append((d_lo, d_hi))
-    return widths
-
 def escape_char(c):
     return "'\\u{%x}'" % c if c != 0 else "'\\0'"
 
@@ -316,12 +279,12 @@ def emit_bsearch_range_table(f):
 fn bsearch_range_table(c: char, r: &'static [(char, char)]) -> bool {
     use core::cmp::Ordering::{Equal, Less, Greater};
     r.binary_search_by(|&(lo, hi)| {
-         if lo <= c && c <= hi {
-             Equal
+         if c < lo {
+             Greater
          } else if hi < c {
              Less
          } else {
-             Greater
+             Equal
          }
      })
      .is_ok()
@@ -344,46 +307,211 @@ def emit_table(f, name, t_data, t_type = "&'static [(char, char)]", is_pub=True,
     format_table_content(f, data, 8)
     f.write("\n    ];\n\n")
 
+def emit_trie_lookup_range_table(f):
+    f.write("""
+
+// BoolTrie is a trie for representing a set of Unicode codepoints. It is
+// implemented with postfix compression (sharing of identical child nodes),
+// which gives both compact size and fast lookup.
+//
+// The space of Unicode codepoints is divided into 3 subareas, each
+// represented by a trie with different depth. In the first (0..0x800), there
+// is no trie structure at all; each u64 entry corresponds to a bitvector
+// effectively holding 64 bool values.
+//
+// In the second (0x800..0x10000), each child of the root node represents a
+// 64-wide subrange, but instead of storing the full 64-bit value of the leaf,
+// the trie stores an 8-bit index into a shared table of leaf values. This
+// exploits the fact that in reasonable sets, many such leaves can be shared.
+//
+// In the third (0x10000..0x110000), each child of the root node represents a
+// 4096-wide subrange, and the trie stores an 8-bit index into a 64-byte slice
+// of a child tree. Each of these 64 bytes represents an index into the table
+// of shared 64-bit leaf values. This exploits the sparse structure in the
+// non-BMP range of most Unicode sets.
+pub struct BoolTrie {
+    // 0..0x800 (corresponding to 1 and 2 byte utf-8 sequences)
+    r1: [u64; 32],   // leaves
+
+    // 0x800..0x10000 (corresponding to 3 byte utf-8 sequences)
+    r2: [u8; 992],      // first level
+    r3: &'static [u64],  // leaves
+
+    // 0x10000..0x110000 (corresponding to 4 byte utf-8 sequences)
+    r4: [u8; 256],       // first level
+    r5: &'static [u8],   // second level
+    r6: &'static [u64],  // leaves
+}
+
+fn trie_range_leaf(c: usize, bitmap_chunk: u64) -> bool {
+    ((bitmap_chunk >> (c & 63)) & 1) != 0
+}
+
+fn trie_lookup_range_table(c: char, r: &'static BoolTrie) -> bool {
+    let c = c as usize;
+    if c < 0x800 {
+        trie_range_leaf(c, r.r1[c >> 6])
+    } else if c < 0x10000 {
+        let child = r.r2[(c >> 6) - 0x20];
+        trie_range_leaf(c, r.r3[child as usize])
+    } else {
+        let child = r.r4[(c >> 12) - 0x10];
+        let leaf = r.r5[((child as usize) << 6) + ((c >> 6) & 0x3f)];
+        trie_range_leaf(c, r.r6[leaf as usize])
+    }
+}
+
+pub struct SmallBoolTrie {
+    r1: &'static [u8],  // first level
+    r2: &'static [u64],  // leaves
+}
+
+impl SmallBoolTrie {
+    fn lookup(&self, c: char) -> bool {
+        let c = c as usize;
+        match self.r1.get(c >> 6) {
+            Some(&child) => trie_range_leaf(c, self.r2[child as usize]),
+            None => false,
+        }
+    }
+}
+
+""")
+
+def compute_trie(rawdata, chunksize):
+    root = []
+    childmap = {}
+    child_data = []
+    for i in range(len(rawdata) / chunksize):
+        data = rawdata[i * chunksize: (i + 1) * chunksize]
+        child = '|'.join(map(str, data))
+        if child not in childmap:
+            childmap[child] = len(childmap)
+            child_data.extend(data)
+        root.append(childmap[child])
+    return (root, child_data)
+
+def emit_bool_trie(f, name, t_data, is_pub=True):
+    CHUNK = 64
+    rawdata = [False] * 0x110000
+    for (lo, hi) in t_data:
+        for cp in range(lo, hi + 1):
+            rawdata[cp] = True
+
+    # convert to bitmap chunks of 64 bits each
+    chunks = []
+    for i in range(0x110000 / CHUNK):
+        chunk = 0
+        for j in range(64):
+            if rawdata[i * 64 + j]:
+                chunk |= 1 << j
+        chunks.append(chunk)
+
+    pub_string = ""
+    if is_pub:
+        pub_string = "pub "
+    f.write("    %sconst %s: &'static super::BoolTrie = &super::BoolTrie {\n" % (pub_string, name))
+    f.write("        r1: [\n")
+    data = ','.join('0x%016x' % chunk for chunk in chunks[0:0x800 / CHUNK])
+    format_table_content(f, data, 12)
+    f.write("\n        ],\n")
+
+    # 0x800..0x10000 trie
+    (r2, r3) = compute_trie(chunks[0x800 / CHUNK : 0x10000 / CHUNK], 64 / CHUNK)
+    f.write("        r2: [\n")
+    data = ','.join(str(node) for node in r2)
+    format_table_content(f, data, 12)
+    f.write("\n        ],\n")
+    f.write("        r3: &[\n")
+    data = ','.join('0x%016x' % chunk for chunk in r3)
+    format_table_content(f, data, 12)
+    f.write("\n        ],\n")
+
+    # 0x10000..0x110000 trie
+    (mid, r6) = compute_trie(chunks[0x10000 / CHUNK : 0x110000 / CHUNK], 64 / CHUNK)
+    (r4, r5) = compute_trie(mid, 64)
+    f.write("        r4: [\n")
+    data = ','.join(str(node) for node in r4)
+    format_table_content(f, data, 12)
+    f.write("\n        ],\n")
+    f.write("        r5: &[\n")
+    data = ','.join(str(node) for node in r5)
+    format_table_content(f, data, 12)
+    f.write("\n        ],\n")
+    f.write("        r6: &[\n")
+    data = ','.join('0x%016x' % chunk for chunk in r6)
+    format_table_content(f, data, 12)
+    f.write("\n        ],\n")
+
+    f.write("    };\n\n")
+
+def emit_small_bool_trie(f, name, t_data, is_pub=True):
+    last_chunk = max(int(hi / 64) for (lo, hi) in t_data)
+    n_chunks = last_chunk + 1
+    chunks = [0] * n_chunks
+    for (lo, hi) in t_data:
+        for cp in range(lo, hi + 1):
+            if int(cp / 64) >= len(chunks):
+                print(cp, int(cp / 64), len(chunks), lo, hi)
+            chunks[int(cp / 64)] |= 1 << (cp & 63)
+
+    pub_string = ""
+    if is_pub:
+        pub_string = "pub "
+    f.write("    %sconst %s: &'static super::SmallBoolTrie = &super::SmallBoolTrie {\n"
+            % (pub_string, name))
+
+    (r1, r2) = compute_trie(chunks, 1)
+
+    f.write("        r1: &[\n")
+    data = ','.join(str(node) for node in r1)
+    format_table_content(f, data, 12)
+    f.write("\n        ],\n")
+
+    f.write("        r2: &[\n")
+    data = ','.join('0x%016x' % node for node in r2)
+    format_table_content(f, data, 12)
+    f.write("\n        ],\n")
+
+    f.write("    };\n\n")
+
 def emit_property_module(f, mod, tbl, emit):
     f.write("pub mod %s {\n" % mod)
     for cat in sorted(emit):
-        emit_table(f, "%s_table" % cat, tbl[cat])
-        f.write("    pub fn %s(c: char) -> bool {\n" % cat)
-        f.write("        super::bsearch_range_table(c, %s_table)\n" % cat)
-        f.write("    }\n\n")
+        if cat in ["Cc", "White_Space", "Pattern_White_Space"]:
+            emit_small_bool_trie(f, "%s_table" % cat, tbl[cat])
+            f.write("    pub fn %s(c: char) -> bool {\n" % cat)
+            f.write("        %s_table.lookup(c)\n" % cat)
+            f.write("    }\n\n")
+        else:
+            emit_bool_trie(f, "%s_table" % cat, tbl[cat])
+            f.write("    pub fn %s(c: char) -> bool {\n" % cat)
+            f.write("        super::trie_lookup_range_table(c, %s_table)\n" % cat)
+            f.write("    }\n\n")
     f.write("}\n\n")
 
 def emit_conversions_module(f, to_upper, to_lower, to_title):
     f.write("pub mod conversions {")
     f.write("""
-    use core::cmp::Ordering::{Equal, Less, Greater};
     use core::option::Option;
     use core::option::Option::{Some, None};
-    use core::result::Result::{Ok, Err};
 
     pub fn to_lower(c: char) -> [char; 3] {
         match bsearch_case_table(c, to_lowercase_table) {
-          None        => [c, '\\0', '\\0'],
-          Some(index) => to_lowercase_table[index].1
+            None        => [c, '\\0', '\\0'],
+            Some(index) => to_lowercase_table[index].1,
         }
     }
 
     pub fn to_upper(c: char) -> [char; 3] {
         match bsearch_case_table(c, to_uppercase_table) {
             None        => [c, '\\0', '\\0'],
-            Some(index) => to_uppercase_table[index].1
+            Some(index) => to_uppercase_table[index].1,
         }
     }
 
     fn bsearch_case_table(c: char, table: &'static [(char, [char; 3])]) -> Option<usize> {
-        match table.binary_search_by(|&(key, _)| {
-            if c == key { Equal }
-            else if key < c { Less }
-            else { Greater }
-        }) {
-            Ok(i) => Some(i),
-            Err(_) => None,
-        }
+        table.binary_search_by(|&(key, _)| key.cmp(&c)).ok()
     }
 
 """)
@@ -396,47 +524,6 @@ def emit_conversions_module(f, to_upper, to_lower, to_title):
     emit_table(f, "to_uppercase_table",
         sorted(to_upper.iteritems(), key=operator.itemgetter(0)),
         is_pub=False, t_type = t_type, pfun=pfun)
-    f.write("}\n\n")
-
-def emit_charwidth_module(f, width_table):
-    f.write("pub mod charwidth {\n")
-    f.write("    use core::option::Option;\n")
-    f.write("    use core::option::Option::{Some, None};\n")
-    f.write("    use core::result::Result::{Ok, Err};\n")
-    f.write("""
-    fn bsearch_range_value_table(c: char, is_cjk: bool, r: &'static [(char, char, u8, u8)]) -> u8 {
-        use core::cmp::Ordering::{Equal, Less, Greater};
-        match r.binary_search_by(|&(lo, hi, _, _)| {
-            if lo <= c && c <= hi { Equal }
-            else if hi < c { Less }
-            else { Greater }
-        }) {
-            Ok(idx) => {
-                let (_, _, r_ncjk, r_cjk) = r[idx];
-                if is_cjk { r_cjk } else { r_ncjk }
-            }
-            Err(_) => 1
-        }
-    }
-""")
-
-    f.write("""
-    pub fn width(c: char, is_cjk: bool) -> Option<usize> {
-        match c as usize {
-            _c @ 0 => Some(0),          // null is zero width
-            cu if cu < 0x20 => None,    // control sequences have no width
-            cu if cu < 0x7F => Some(1), // ASCII
-            cu if cu < 0xA0 => None,    // more control sequences
-            _ => Some(bsearch_range_value_table(c, is_cjk, charwidth_table) as usize)
-        }
-    }
-
-""")
-
-    f.write("    // character width table. Based on Markus Kuhn's free wcwidth() implementation,\n")
-    f.write("    //     http://www.cl.cam.ac.uk/~mgk25/ucs/wcwidth.c\n")
-    emit_table(f, "charwidth_table", width_table, "&'static [(char, char, u8, u8)]", is_pub=False,
-            pfun=lambda x: "(%s,%s,%s,%s)" % (escape_char(x[0]), escape_char(x[1]), x[2], x[3]))
     f.write("}\n\n")
 
 def emit_norm_module(f, canon, compat, combine, norm_props):
@@ -458,43 +545,6 @@ def emit_norm_module(f, canon, compat, combine, norm_props):
             canon_comp[decomp[0]].append( (decomp[1], char) )
     canon_comp_keys = canon_comp.keys()
     canon_comp_keys.sort()
-
-def remove_from_wtable(wtable, val):
-    wtable_out = []
-    while wtable:
-        if wtable[0][1] < val:
-            wtable_out.append(wtable.pop(0))
-        elif wtable[0][0] > val:
-            break
-        else:
-            (wt_lo, wt_hi, width, width_cjk) = wtable.pop(0)
-            if wt_lo == wt_hi == val:
-                continue
-            elif wt_lo == val:
-                wtable_out.append((wt_lo+1, wt_hi, width, width_cjk))
-            elif wt_hi == val:
-                wtable_out.append((wt_lo, wt_hi-1, width, width_cjk))
-            else:
-                wtable_out.append((wt_lo, val-1, width, width_cjk))
-                wtable_out.append((val+1, wt_hi, width, width_cjk))
-    if wtable:
-        wtable_out.extend(wtable)
-    return wtable_out
-
-
-
-def optimize_width_table(wtable):
-    wtable_out = []
-    w_this = wtable.pop(0)
-    while wtable:
-        if w_this[1] == wtable[0][0] - 1 and w_this[2:3] == wtable[0][2:3]:
-            w_tmp = wtable.pop(0)
-            w_this = (w_this[0], w_tmp[1], w_tmp[2], w_tmp[3])
-        else:
-            wtable_out.append(w_this)
-            w_this = wtable.pop(0)
-    wtable_out.append(w_this)
-    return wtable_out
 
 if __name__ == "__main__":
     r = "tables.rs"
@@ -522,17 +572,18 @@ pub const UNICODE_VERSION: (u64, u64, u64) = (%s, %s, %s);
         derived = load_properties("DerivedCoreProperties.txt", want_derived)
         scripts = load_properties("Scripts.txt", [])
         props = load_properties("PropList.txt",
-                ["White_Space", "Join_Control", "Noncharacter_Code_Point"])
+                ["White_Space", "Join_Control", "Noncharacter_Code_Point", "Pattern_White_Space"])
         norm_props = load_properties("DerivedNormalizationProps.txt",
                      ["Full_Composition_Exclusion"])
 
-        # bsearch_range_table is used in all the property modules below
-        emit_bsearch_range_table(rf)
+        # trie_lookup_table is used in all the property modules below
+        emit_trie_lookup_range_table(rf)
+        # emit_bsearch_range_table(rf)
 
         # category tables
         for (name, cat, pfuns) in ("general_category", gencats, ["N", "Cc"]), \
                                   ("derived_property", derived, want_derived), \
-                                  ("property", props, ["White_Space"]):
+                                  ("property", props, ["White_Space", "Pattern_White_Space"]):
             emit_property_module(rf, name, cat, pfuns)
 
         # normalizations and conversions module

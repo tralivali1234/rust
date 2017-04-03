@@ -14,7 +14,6 @@ fn main() {
     {
         struct Bar;
         use foo::Bar;
-        //~^ ERROR import `Bar` conflicts with type in this module
-        //~^^ ERROR import `Bar` conflicts with value in this module
+        //~^ ERROR a type named `Bar` has already been defined in this block
     }
 }

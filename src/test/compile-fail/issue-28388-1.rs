@@ -10,6 +10,6 @@
 
 // Prefix in imports with empty braces should be resolved and checked privacy, stability, etc.
 
-use foo::{}; //~ ERROR failed to resolve. foo
+use foo::{}; //~ ERROR cannot find module or enum `foo` in the crate root
 
 fn main() {}

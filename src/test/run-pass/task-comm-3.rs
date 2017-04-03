@@ -10,7 +10,7 @@
 
 #![feature(std_misc)]
 
-// no-pretty-expanded FIXME #15189
+// ignore-emscripten no threads support
 
 use std::thread;
 use std::sync::mpsc::{channel, Sender};

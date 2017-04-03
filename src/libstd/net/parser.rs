@@ -13,11 +13,8 @@
 //! This module is "publicly exported" through the `FromStr` implementations
 //! below.
 
-use prelude::v1::*;
-
 use error::Error;
 use fmt;
-#[allow(deprecated)]
 use net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6};
 use str::FromStr;
 
@@ -67,9 +64,8 @@ impl<'a> Parser<'a> {
     fn read_or<T>(&mut self, parsers: &mut [Box<FnMut(&mut Parser) -> Option<T> + 'static>])
                -> Option<T> {
         for pf in parsers {
-            match self.read_atomically(|p: &mut Parser| pf(p)) {
-                Some(r) => return Some(r),
-                None => {}
+            if let Some(r) = self.read_atomically(|p: &mut Parser| pf(p)) {
+                return Some(r);
             }
         }
         None
@@ -193,8 +189,8 @@ impl<'a> Parser<'a> {
         fn ipv6_addr_from_head_tail(head: &[u16], tail: &[u16]) -> Ipv6Addr {
             assert!(head.len() + tail.len() <= 8);
             let mut gs = [0; 8];
-            gs.clone_from_slice(head);
-            gs[(8 - tail.len()) .. 8].clone_from_slice(tail);
+            gs[..head.len()].copy_from_slice(head);
+            gs[(8 - tail.len()) .. 8].copy_from_slice(tail);
             Ipv6Addr::new(gs[0], gs[1], gs[2], gs[3], gs[4], gs[5], gs[6], gs[7])
         }
 
@@ -262,7 +258,6 @@ impl<'a> Parser<'a> {
         self.read_atomically(|p| p.read_ipv6_addr_impl())
     }
 
-    #[allow(deprecated)]
     fn read_ip_addr(&mut self) -> Option<IpAddr> {
         let ipv4_addr = |p: &mut Parser| p.read_ipv4_addr().map(IpAddr::V4);
         let ipv6_addr = |p: &mut Parser| p.read_ipv6_addr().map(IpAddr::V6);
@@ -307,8 +302,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-#[stable(feature = "rust1", since = "1.0.0")]
-#[allow(deprecated)]
+#[stable(feature = "ip_addr", since = "1.7.0")]
 impl FromStr for IpAddr {
     type Err = AddrParseError;
     fn from_str(s: &str) -> Result<IpAddr, AddrParseError> {
@@ -374,9 +368,21 @@ impl FromStr for SocketAddr {
     }
 }
 
-/// An error returned when parsing an IP address or a socket address.
+/// An error which can be returned when parsing an IP address or a socket address.
+///
+/// This error is used as the error type for the [`FromStr`] implementation for
+/// [`IpAddr`], [`Ipv4Addr`], [`Ipv6Addr`], [`SocketAddr`], [`SocketAddrV4`], and
+/// [`SocketAddrV6`].
+///
+/// [`FromStr`]: ../../std/str/trait.FromStr.html
+/// [`IpAddr`]: ../../std/net/enum.IpAddr.html
+/// [`Ipv4Addr`]: ../../std/net/struct.Ipv4Addr.html
+/// [`Ipv6Addr`]: ../../std/net/struct.Ipv6Addr.html
+/// [`SocketAddr`]: ../../std/net/enum.SocketAddr.html
+/// [`SocketAddrV4`]: ../../std/net/struct.SocketAddrV4.html
+/// [`SocketAddrV6`]: ../../std/net/struct.SocketAddrV6.html
 #[stable(feature = "rust1", since = "1.0.0")]
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AddrParseError(());
 
 #[stable(feature = "addr_parse_error_error", since = "1.4.0")]

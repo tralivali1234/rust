@@ -10,9 +10,9 @@
 
 pub fn main() {
     const z: &'static isize = {
+        //~^ ERROR blocks in constants are limited to items and tail expressions
         let p = 3;
         //~^ ERROR blocks in constants are limited to items and tail expressions
-        &p
-        //~^ ERROR paths in constants may only refer to constants or functions
+        &p //~ ERROR `p` does not live long enough
     };
 }

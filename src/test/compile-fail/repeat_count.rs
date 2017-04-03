@@ -13,57 +13,37 @@
 fn main() {
     let n = 1;
     let a = [0; n];
-    //~^ ERROR expected constant integer for repeat count, found variable [E0307]
+    //~^ ERROR attempt to use a non-constant value in a constant [E0435]
     let b = [0; ()];
     //~^ ERROR mismatched types
-    //~| expected `usize`
-    //~| found `()`
-    //~| expected usize
-    //~| found ()) [E0308]
-    //~| ERROR expected positive integer for repeat count, found tuple [E0306]
+    //~| expected type `usize`
+    //~| found type `()`
+    //~| expected usize, found ()
     let c = [0; true];
     //~^ ERROR mismatched types
-    //~| expected `usize`
-    //~| found `bool`
-    //~| expected usize
-    //~| found bool) [E0308]
-    //~| ERROR expected positive integer for repeat count, found boolean [E0306]
+    //~| expected usize, found bool
     let d = [0; 0.5];
     //~^ ERROR mismatched types
-    //~| expected `usize`
-    //~| found `_`
-    //~| expected usize
-    //~| found floating-point variable) [E0308]
-    //~| ERROR expected positive integer for repeat count, found float [E0306]
+    //~| expected type `usize`
+    //~| found type `{float}`
+    //~| expected usize, found floating-point variable
     let e = [0; "foo"];
     //~^ ERROR mismatched types
-    //~| expected `usize`
-    //~| found `&'static str`
-    //~| expected usize
-    //~| found &-ptr) [E0308]
-    //~| ERROR expected positive integer for repeat count, found string literal [E0306]
+    //~| expected type `usize`
+    //~| found type `&'static str`
+    //~| expected usize, found reference
     let f = [0; -4_isize];
     //~^ ERROR mismatched types
-    //~| expected `usize`
-    //~| found `isize`
-    //~| expected usize
-    //~| found isize) [E0308]
-    //~| ERROR expected positive integer for repeat count, found negative integer [E0306]
+    //~| expected usize, found isize
     let f = [0_usize; -1_isize];
     //~^ ERROR mismatched types
-    //~| expected `usize`
-    //~| found `isize`
-    //~| expected usize
-    //~| found isize) [E0308]
-    //~| ERROR expected positive integer for repeat count, found negative integer [E0306]
+    //~| expected usize, found isize
     struct G {
         g: (),
     }
     let g = [0; G { g: () }];
     //~^ ERROR mismatched types
-    //~| expected `usize`
-    //~| found `main::G`
-    //~| expected usize
-    //~| found struct `main::G`) [E0308]
-    //~| ERROR expected positive integer for repeat count, found struct [E0306]
+    //~| expected type `usize`
+    //~| found type `main::G`
+    //~| expected usize, found struct `main::G`
 }

@@ -183,15 +183,15 @@ impl fmt::Debug for Toc {
 
 impl fmt::Display for Toc {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        try!(write!(fmt, "<ul>"));
+        write!(fmt, "<ul>")?;
         for entry in &self.entries {
             // recursively format this table of contents (the
             // `{children}` is the key).
-            try!(write!(fmt,
-                        "\n<li><a href=\"#{id}\">{num} {name}</a>{children}</li>",
-                        id = entry.id,
-                        num = entry.sec_number, name = entry.name,
-                        children = entry.children))
+            write!(fmt,
+                   "\n<li><a href=\"#{id}\">{num} {name}</a>{children}</li>",
+                   id = entry.id,
+                   num = entry.sec_number, name = entry.name,
+                   children = entry.children)?
         }
         write!(fmt, "</ul>")
     }
@@ -247,7 +247,7 @@ mod tests {
         macro_rules! toc {
             ($(($level: expr, $name: expr, $(($sub: tt))* )),*) => {
                 Toc {
-                    entries: vec!(
+                    entries: vec![
                         $(
                             TocEntry {
                                 level: $level,
@@ -257,7 +257,7 @@ mod tests {
                                 children: toc!($($sub),*)
                             }
                             ),*
-                        )
+                        ]
                 }
             }
         }

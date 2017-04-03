@@ -13,10 +13,10 @@ static Y: u8 = 1;
 fn foo() {}
 
 impl X {}
-//~^ ERROR use of undeclared type name `X`
+//~^ ERROR expected type, found constant `X`
 impl Y {}
-//~^ ERROR use of undeclared type name `Y`
+//~^ ERROR expected type, found static `Y`
 impl foo {}
-//~^ ERROR use of undeclared type name `foo`
+//~^ ERROR expected type, found function `foo`
 
 fn main() {}

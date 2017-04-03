@@ -21,34 +21,29 @@
 
 pub use self::LangItem::*;
 
-use front::map as hir_map;
+use dep_graph::DepNode;
+use hir::map as hir_map;
 use session::Session;
-use middle::cstore::CrateStore;
-use middle::def_id::DefId;
-use middle::ty;
+use hir::def_id::DefId;
+use ty;
 use middle::weak_lang_items;
-use util::nodemap::FnvHashMap;
+use util::nodemap::FxHashMap;
 
 use syntax::ast;
-use syntax::attr::AttrMetaMethods;
-use syntax::codemap::{DUMMY_SP, Span};
-use syntax::parse::token::InternedString;
-use rustc_front::intravisit::Visitor;
-use rustc_front::hir;
-
-use std::iter::Enumerate;
-use std::slice;
+use syntax::symbol::Symbol;
+use hir::itemlikevisit::ItemLikeVisitor;
+use hir;
 
 // The actual lang items defined come at the end of this file in one handy table.
 // So you probably just want to nip down to the end.
-macro_rules! lets_do_this {
+macro_rules! language_item_table {
     (
         $( $variant:ident, $name:expr, $method:ident; )*
     ) => {
 
 
 enum_from_u32! {
-    #[derive(Copy, Clone, PartialEq, Eq, Hash)]
+    #[derive(Copy, Clone, PartialEq, Eq, Hash, RustcEncodable, RustcDecodable)]
     pub enum LangItem {
         $($variant,)*
     }
@@ -64,13 +59,13 @@ impl LanguageItems {
         fn foo(_: LangItem) -> Option<DefId> { None }
 
         LanguageItems {
-            items: vec!($(foo($variant)),*),
+            items: vec![$(foo($variant)),*],
             missing: Vec::new(),
         }
     }
 
-    pub fn items<'a>(&'a self) -> Enumerate<slice::Iter<'a, Option<DefId>>> {
-        self.items.iter().enumerate()
+    pub fn items(&self) -> &[Option<DefId>] {
+        &*self.items
     }
 
     pub fn item_name(index: usize) -> &'static str {
@@ -95,36 +90,11 @@ impl LanguageItems {
         self.require(OwnedBoxLangItem)
     }
 
-    pub fn from_builtin_kind(&self, bound: ty::BuiltinBound)
-                             -> Result<DefId, String>
-    {
-        match bound {
-            ty::BoundSend => self.require(SendTraitLangItem),
-            ty::BoundSized => self.require(SizedTraitLangItem),
-            ty::BoundCopy => self.require(CopyTraitLangItem),
-            ty::BoundSync => self.require(SyncTraitLangItem),
-        }
-    }
-
-    pub fn to_builtin_kind(&self, id: DefId) -> Option<ty::BuiltinBound> {
-        if Some(id) == self.send_trait() {
-            Some(ty::BoundSend)
-        } else if Some(id) == self.sized_trait() {
-            Some(ty::BoundSized)
-        } else if Some(id) == self.copy_trait() {
-            Some(ty::BoundCopy)
-        } else if Some(id) == self.sync_trait() {
-            Some(ty::BoundSync)
-        } else {
-            None
-        }
-    }
-
     pub fn fn_trait_kind(&self, id: DefId) -> Option<ty::ClosureKind> {
         let def_id_kinds = [
-            (self.fn_trait(), ty::FnClosureKind),
-            (self.fn_mut_trait(), ty::FnMutClosureKind),
-            (self.fn_once_trait(), ty::FnOnceClosureKind),
+            (self.fn_trait(), ty::ClosureKind::Fn),
+            (self.fn_mut_trait(), ty::ClosureKind::FnMut),
+            (self.fn_once_trait(), ty::ClosureKind::FnOnce),
             ];
 
         for &(opt_def_id, kind) in &def_id_kinds {
@@ -147,49 +117,82 @@ impl LanguageItems {
 struct LanguageItemCollector<'a, 'tcx: 'a> {
     items: LanguageItems,
 
-    ast_map: &'a hir_map::Map<'tcx>,
+    hir_map: &'a hir_map::Map<'tcx>,
 
     session: &'a Session,
 
-    item_refs: FnvHashMap<&'static str, usize>,
+    item_refs: FxHashMap<&'static str, usize>,
 }
 
-impl<'a, 'v, 'tcx> Visitor<'v> for LanguageItemCollector<'a, 'tcx> {
+impl<'a, 'v, 'tcx> ItemLikeVisitor<'v> for LanguageItemCollector<'a, 'tcx> {
     fn visit_item(&mut self, item: &hir::Item) {
         if let Some(value) = extract(&item.attrs) {
-            let item_index = self.item_refs.get(&value[..]).cloned();
+            let item_index = self.item_refs.get(&*value.as_str()).cloned();
 
             if let Some(item_index) = item_index {
-                self.collect_item(item_index, self.ast_map.local_def_id(item.id), item.span)
+                self.collect_item(item_index, self.hir_map.local_def_id(item.id))
+            } else {
+                let span = self.hir_map.span(item.id);
+                span_err!(self.session, span, E0522,
+                          "definition of an unknown language item: `{}`.",
+                          value);
             }
         }
+    }
+
+    fn visit_trait_item(&mut self, _trait_item: &hir::TraitItem) {
+        // at present, lang items are always items, not trait items
+    }
+
+    fn visit_impl_item(&mut self, _impl_item: &hir::ImplItem) {
+        // at present, lang items are always items, not impl items
     }
 }
 
 impl<'a, 'tcx> LanguageItemCollector<'a, 'tcx> {
-    pub fn new(session: &'a Session, ast_map: &'a hir_map::Map<'tcx>)
+    pub fn new(session: &'a Session, hir_map: &'a hir_map::Map<'tcx>)
                -> LanguageItemCollector<'a, 'tcx> {
-        let mut item_refs = FnvHashMap();
+        let mut item_refs = FxHashMap();
 
         $( item_refs.insert($name, $variant as usize); )*
 
         LanguageItemCollector {
             session: session,
-            ast_map: ast_map,
+            hir_map: hir_map,
             items: LanguageItems::new(),
             item_refs: item_refs,
         }
     }
 
     pub fn collect_item(&mut self, item_index: usize,
-                        item_def_id: DefId, span: Span) {
+                        item_def_id: DefId) {
         // Check for duplicates.
         match self.items.items[item_index] {
             Some(original_def_id) if original_def_id != item_def_id => {
-                span_err!(self.session, span, E0152,
-                    "duplicate entry for `{}`", LanguageItems::item_name(item_index));
+                let cstore = &self.session.cstore;
+                let name = LanguageItems::item_name(item_index);
+                let mut err = match self.hir_map.span_if_local(item_def_id) {
+                    Some(span) => struct_span_err!(
+                        self.session,
+                        span,
+                        E0152,
+                        "duplicate lang item found: `{}`.",
+                        name),
+                    None => self.session.struct_err(&format!(
+                            "duplicate lang item in crate `{}`: `{}`.",
+                            cstore.crate_name(item_def_id.krate),
+                            name)),
+                };
+                if let Some(span) = self.hir_map.span_if_local(original_def_id) {
+                    span_note!(&mut err, span,
+                               "first defined here.");
+                } else {
+                    err.note(&format!("first defined in crate `{}`.",
+                                      cstore.crate_name(original_def_id.krate)));
+                }
+                err.emit();
             }
-            Some(_) | None => {
+            _ => {
                 // OK.
             }
         }
@@ -199,31 +202,30 @@ impl<'a, 'tcx> LanguageItemCollector<'a, 'tcx> {
     }
 
     pub fn collect_local_language_items(&mut self, krate: &hir::Crate) {
-        krate.visit_all_items(self);
+        krate.visit_all_item_likes(self);
     }
 
     pub fn collect_external_language_items(&mut self) {
         let cstore = &self.session.cstore;
+
         for cnum in cstore.crates() {
             for (index, item_index) in cstore.lang_items(cnum) {
                 let def_id = DefId { krate: cnum, index: index };
-                self.collect_item(item_index, def_id, DUMMY_SP);
+                self.collect_item(item_index, def_id);
             }
         }
     }
 
     pub fn collect(&mut self, krate: &hir::Crate) {
-        self.collect_local_language_items(krate);
         self.collect_external_language_items();
+        self.collect_local_language_items(krate);
     }
 }
 
-pub fn extract(attrs: &[ast::Attribute]) -> Option<InternedString> {
+pub fn extract(attrs: &[ast::Attribute]) -> Option<Symbol> {
     for attribute in attrs {
         match attribute.value_str() {
-            Some(ref value) if attribute.check_name("lang") => {
-                return Some(value.clone());
-            }
+            Some(value) if attribute.check_name("lang") => return Some(value),
             _ => {}
         }
     }
@@ -234,12 +236,12 @@ pub fn extract(attrs: &[ast::Attribute]) -> Option<InternedString> {
 pub fn collect_language_items(session: &Session,
                               map: &hir_map::Map)
                               -> LanguageItems {
+    let _task = map.dep_graph.in_task(DepNode::CollectLanguageItems);
     let krate: &hir::Crate = map.krate();
     let mut collector = LanguageItemCollector::new(session, map);
     collector.collect(krate);
     let LanguageItemCollector { mut items, .. } = collector;
     weak_lang_items::check_crate(krate, session, &mut items);
-    session.abort_if_errors();
     items
 }
 
@@ -247,7 +249,7 @@ pub fn collect_language_items(session: &Session,
     }
 }
 
-lets_do_this! {
+language_item_table! {
 //  Variant name,                    Name,                      Method name;
     CharImplItem,                    "char",                    char_impl;
     StrImplItem,                     "str",                     str_impl;
@@ -258,11 +260,13 @@ lets_do_this! {
     I16ImplItem,                     "i16",                     i16_impl;
     I32ImplItem,                     "i32",                     i32_impl;
     I64ImplItem,                     "i64",                     i64_impl;
+    I128ImplItem,                     "i128",                   i128_impl;
     IsizeImplItem,                   "isize",                   isize_impl;
     U8ImplItem,                      "u8",                      u8_impl;
     U16ImplItem,                     "u16",                     u16_impl;
     U32ImplItem,                     "u32",                     u32_impl;
     U64ImplItem,                     "u64",                     u64_impl;
+    U128ImplItem,                    "u128",                    u128_impl;
     UsizeImplItem,                   "usize",                   usize_impl;
     F32ImplItem,                     "f32",                     f32_impl;
     F64ImplItem,                     "f64",                     f64_impl;
@@ -301,10 +305,6 @@ lets_do_this! {
     ShrAssignTraitLangItem,          "shr_assign",              shr_assign_trait;
     IndexTraitLangItem,              "index",                   index_trait;
     IndexMutTraitLangItem,           "index_mut",               index_mut_trait;
-    RangeStructLangItem,             "range",                   range_struct;
-    RangeFromStructLangItem,         "range_from",              range_from_struct;
-    RangeToStructLangItem,           "range_to",                range_to_struct;
-    RangeFullStructLangItem,         "range_full",              range_full_struct;
 
     UnsafeCellTypeLangItem,          "unsafe_cell",             unsafe_cell_type;
 
@@ -334,13 +334,12 @@ lets_do_this! {
     PanicFmtLangItem,                "panic_fmt",               panic_fmt;
 
     ExchangeMallocFnLangItem,        "exchange_malloc",         exchange_malloc_fn;
-    ExchangeFreeFnLangItem,          "exchange_free",           exchange_free_fn;
-    StrDupUniqFnLangItem,            "strdup_uniq",             strdup_uniq_fn;
+    BoxFreeFnLangItem,               "box_free",                box_free_fn;
+    DropInPlaceFnLangItem,             "drop_in_place",           drop_in_place_fn;
 
     StartFnLangItem,                 "start",                   start_fn;
 
     EhPersonalityLangItem,           "eh_personality",          eh_personality;
-    EhPersonalityCatchLangItem,      "eh_personality_catch",    eh_personality_catch;
     EhUnwindResumeLangItem,          "eh_unwind_resume",        eh_unwind_resume;
     MSVCTryFilterLangItem,           "msvc_try_filter",         msvc_try_filter;
 
@@ -356,9 +355,15 @@ lets_do_this! {
     ContravariantLifetimeItem,       "contravariant_lifetime",  contravariant_lifetime;
     InvariantLifetimeItem,           "invariant_lifetime",      invariant_lifetime;
 
-    NoCopyItem,                      "no_copy_bound",           no_copy_bound;
-
     NonZeroItem,                     "non_zero",                non_zero;
 
     DebugTraitLangItem,              "debug_trait",             debug_trait;
+}
+
+impl<'a, 'tcx, 'gcx> ty::TyCtxt<'a, 'tcx, 'gcx> {
+    pub fn require_lang_item(&self, lang_item: LangItem) -> DefId {
+        self.lang_items.require(lang_item).unwrap_or_else(|msg| {
+            self.sess.fatal(&msg)
+        })
+    }
 }

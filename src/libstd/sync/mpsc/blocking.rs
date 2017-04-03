@@ -13,9 +13,8 @@
 use thread::{self, Thread};
 use sync::atomic::{AtomicBool, Ordering};
 use sync::Arc;
-use marker::{Sync, Send};
 use mem;
-use clone::Clone;
+use time::Instant;
 
 struct Inner {
     thread: Thread,
@@ -74,7 +73,6 @@ impl SignalToken {
     pub unsafe fn cast_from_usize(signal_ptr: usize) -> SignalToken {
         SignalToken { inner: mem::transmute(signal_ptr) }
     }
-
 }
 
 impl WaitToken {
@@ -82,5 +80,17 @@ impl WaitToken {
         while !self.inner.woken.load(Ordering::SeqCst) {
             thread::park()
         }
+    }
+
+    /// Returns true if we wake up normally, false otherwise.
+    pub fn wait_max_until(self, end: Instant) -> bool {
+        while !self.inner.woken.load(Ordering::SeqCst) {
+            let now = Instant::now();
+            if now >= end {
+                return false;
+            }
+            thread::park_timeout(end - now)
+        }
+        true
     }
 }

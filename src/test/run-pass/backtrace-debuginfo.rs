@@ -14,8 +14,10 @@
 // seemingly completely unrelated change.
 // Unfortunately, LLVM has no "disable" option for this, so we have to set
 // "enable" to 0 instead.
+
 // compile-flags:-g -Cllvm-args=-enable-tail-merge=0
-// ignore-pretty as this critically relies on line numbers
+// ignore-pretty issue #37195
+// ignore-emscripten spawning processes is not supported
 
 use std::io;
 use std::io::prelude::*;
@@ -27,30 +29,24 @@ macro_rules! pos {
     () => ((file!(), line!()))
 }
 
-#[cfg(any(all(unix,
-              not(target_os = "macos"),
-              not(target_os = "ios"),
-              not(target_os = "android"),
-              not(all(target_os = "linux", target_arch = "arm"))),
-          all(windows, not(target_arch = "x86"))))]
 macro_rules! dump_and_die {
     ($($pos:expr),*) => ({
         // FIXME(#18285): we cannot include the current position because
         // the macro span takes over the last frame's file/line.
-        dump_filelines(&[$($pos),*]);
-        panic!();
+        if cfg!(any(target_os = "macos",
+                    target_os = "ios",
+                    target_os = "android",
+                    all(target_os = "linux", target_arch = "arm"),
+                    target_os = "freebsd",
+                    target_os = "dragonfly",
+                    target_os = "bitrig",
+                    target_os = "openbsd")) {
+            // skip these platforms as this support isn't implemented yet.
+        } else {
+            dump_filelines(&[$($pos),*]);
+            panic!();
+        }
     })
-}
-
-// this does not work on Windows, Android, OSX or iOS
-#[cfg(not(any(all(unix,
-              not(target_os = "macos"),
-              not(target_os = "ios"),
-              not(target_os = "android"),
-              not(all(target_os = "linux", target_arch = "arm"))),
-          all(windows, not(target_arch = "x86")))))]
-macro_rules! dump_and_die {
-    ($($pos:expr),*) => ({ let _ = [$($pos),*]; })
 }
 
 // we can't use a function as it will alter the backtrace
@@ -145,12 +141,12 @@ fn run_test(me: &str) {
     use std::process::Command;
 
     let mut template = Command::new(me);
-    template.env("RUST_BACKTRACE", "1");
+    template.env("RUST_BACKTRACE", "full");
 
     let mut i = 0;
     loop {
         let out = Command::new(me)
-                          .env("RUST_BACKTRACE", "1")
+                          .env("RUST_BACKTRACE", "full")
                           .arg(i.to_string()).output().unwrap();
         let output = str::from_utf8(&out.stdout).unwrap();
         let error = str::from_utf8(&out.stderr).unwrap();
@@ -176,4 +172,3 @@ fn main() {
         run_test(&args[0]);
     }
 }
-

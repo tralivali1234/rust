@@ -52,16 +52,18 @@
 //!     If an application does not have `getrandom` and likely to be run soon after first booting,
 //!     or on a system with very few entropy sources, one should consider using `/dev/random` via
 //!     `ReaderRng`.
-//! -   On some systems (e.g. FreeBSD, OpenBSD and Mac OS X) there is no difference
+//! -   On some systems (e.g. FreeBSD, OpenBSD and macOS) there is no difference
 //!     between the two sources. (Also note that, on some systems e.g. FreeBSD, both `/dev/random`
 //!     and `/dev/urandom` may block once if the CSPRNG has not seeded yet.)
 
 #![unstable(feature = "rand", issue = "0")]
 
 use cell::RefCell;
+use fmt;
 use io;
 use mem;
 use rc::Rc;
+use sys;
 
 #[cfg(target_pointer_width = "32")]
 use core_rand::IsaacRng as IsaacWordRng;
@@ -71,9 +73,7 @@ use core_rand::Isaac64Rng as IsaacWordRng;
 pub use core_rand::{Rand, Rng, SeedableRng};
 pub use core_rand::{XorShiftRng, IsaacRng, Isaac64Rng};
 pub use core_rand::reseeding;
-pub use rand::os::OsRng;
 
-pub mod os;
 pub mod reader;
 
 /// The standard RNG. This is designed to be efficient on the current
@@ -144,6 +144,12 @@ pub struct ThreadRng {
     rng: Rc<RefCell<ThreadRngInner>>,
 }
 
+impl fmt::Debug for ThreadRng {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("ThreadRng { .. }")
+    }
+}
+
 /// Retrieve the lazily-initialized thread-local random number
 /// generator, seeded by the system. Intended to be used in method
 /// chaining style, e.g. `thread_rng().gen::<isize>()`.
@@ -183,5 +189,98 @@ impl Rng for ThreadRng {
     #[inline]
     fn fill_bytes(&mut self, bytes: &mut [u8]) {
         self.rng.borrow_mut().fill_bytes(bytes)
+    }
+}
+
+/// A random number generator that retrieves randomness straight from
+/// the operating system. Platform sources:
+///
+/// - Unix-like systems (Linux, Android, macOS): read directly from
+///   `/dev/urandom`, or from `getrandom(2)` system call if available.
+/// - Windows: calls `CryptGenRandom`, using the default cryptographic
+///   service provider with the `PROV_RSA_FULL` type.
+/// - iOS: calls SecRandomCopyBytes as /dev/(u)random is sandboxed.
+/// - OpenBSD: uses the `getentropy(2)` system call.
+///
+/// This does not block.
+pub struct OsRng(sys::rand::OsRng);
+
+impl OsRng {
+    /// Create a new `OsRng`.
+    pub fn new() -> io::Result<OsRng> {
+        sys::rand::OsRng::new().map(OsRng)
+    }
+}
+
+impl Rng for OsRng {
+    #[inline]
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+
+    #[inline]
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+
+    #[inline]
+    fn fill_bytes(&mut self, bytes: &mut [u8]) {
+        self.0.fill_bytes(bytes)
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use sync::mpsc::channel;
+    use rand::Rng;
+    use super::OsRng;
+    use thread;
+
+    #[test]
+    fn test_os_rng() {
+        let mut r = OsRng::new().unwrap();
+
+        r.next_u32();
+        r.next_u64();
+
+        let mut v = [0; 1000];
+        r.fill_bytes(&mut v);
+    }
+
+    #[test]
+    #[cfg_attr(target_os = "emscripten", ignore)]
+    fn test_os_rng_tasks() {
+
+        let mut txs = vec![];
+        for _ in 0..20 {
+            let (tx, rx) = channel();
+            txs.push(tx);
+
+            thread::spawn(move|| {
+                // wait until all the threads are ready to go.
+                rx.recv().unwrap();
+
+                // deschedule to attempt to interleave things as much
+                // as possible (XXX: is this a good test?)
+                let mut r = OsRng::new().unwrap();
+                thread::yield_now();
+                let mut v = [0; 1000];
+
+                for _ in 0..100 {
+                    r.next_u32();
+                    thread::yield_now();
+                    r.next_u64();
+                    thread::yield_now();
+                    r.fill_bytes(&mut v);
+                    thread::yield_now();
+                }
+            });
+        }
+
+        // start all the threads
+        for tx in &txs {
+            tx.send(()).unwrap();
+        }
     }
 }

@@ -8,11 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-mod foo { struct bar; }
+mod foo { pub struct bar; }
 
 fn main() {
     let bar = 5;
-    //~^ ERROR declaration of `bar` shadows an enum variant or unit-like struct in scope
+    //~^ ERROR let bindings cannot shadow unit structs
     use foo::bar;
-    //~^ ERROR imports are not allowed after non-item statements
 }

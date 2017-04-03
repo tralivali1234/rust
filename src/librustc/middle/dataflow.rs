@@ -14,19 +14,19 @@
 //! and thus uses bitvectors. Your job is simply to specify the so-called
 //! GEN and KILL bits for each expression.
 
-use middle::cfg;
-use middle::cfg::CFGIndex;
-use middle::ty;
+use cfg;
+use cfg::CFGIndex;
+use ty::TyCtxt;
 use std::io;
+use std::mem;
 use std::usize;
 use syntax::ast;
-use syntax::ast_util::IdRange;
 use syntax::print::pp;
 use syntax::print::pprust::PrintState;
 use util::nodemap::NodeMap;
-use rustc_front::hir;
-use rustc_front::intravisit;
-use rustc_front::print::pprust;
+use hir;
+use hir::intravisit::{self, IdRange};
+use hir::print as pprust;
 
 
 #[derive(Copy, Clone, Debug)]
@@ -37,7 +37,7 @@ pub enum EntryOrExit {
 
 #[derive(Clone)]
 pub struct DataFlowContext<'a, 'tcx: 'a, O> {
-    tcx: &'a ty::ctxt<'tcx>,
+    tcx: TyCtxt<'a, 'tcx, 'tcx>,
 
     /// a name for the analysis using this dataflow instance
     analysis_name: &'static str,
@@ -108,14 +108,17 @@ impl<'a, 'tcx, O:DataFlowOperator> DataFlowContext<'a, 'tcx, O> {
 }
 
 impl<'a, 'tcx, O:DataFlowOperator> pprust::PpAnn for DataFlowContext<'a, 'tcx, O> {
+    fn nested(&self, state: &mut pprust::State, nested: pprust::Nested) -> io::Result<()> {
+        pprust::PpAnn::nested(&self.tcx.hir, state, nested)
+    }
     fn pre(&self,
            ps: &mut pprust::State,
            node: pprust::AnnNode) -> io::Result<()> {
         let id = match node {
-            pprust::NodeName(_) => 0,
+            pprust::NodeName(_) => ast::CRATE_NODE_ID,
             pprust::NodeExpr(expr) => expr.id,
             pprust::NodeBlock(blk) => blk.id,
-            pprust::NodeItem(_) | pprust::NodeSubItem(_) => 0,
+            pprust::NodeItem(_) | pprust::NodeSubItem(_) => ast::CRATE_NODE_ID,
             pprust::NodePat(pat) => pat.id
         };
 
@@ -151,16 +154,16 @@ impl<'a, 'tcx, O:DataFlowOperator> pprust::PpAnn for DataFlowContext<'a, 'tcx, O
                 "".to_string()
             };
 
-            try!(ps.synth_comment(
+            ps.synth_comment(
                 format!("id {}: {}{}{}{}", id, entry_str,
-                        gens_str, action_kills_str, scope_kills_str)));
-            try!(pp::space(&mut ps.s));
+                        gens_str, action_kills_str, scope_kills_str))?;
+            pp::space(&mut ps.s)?;
         }
         Ok(())
     }
 }
 
-fn build_nodeid_to_index(decl: Option<&hir::FnDecl>,
+fn build_nodeid_to_index(body: Option<&hir::Body>,
                          cfg: &cfg::CFG) -> NodeMap<Vec<CFGIndex>> {
     let mut index = NodeMap();
 
@@ -168,9 +171,8 @@ fn build_nodeid_to_index(decl: Option<&hir::FnDecl>,
     // into cfg itself?  i.e. introduce a fn-based flow-graph in
     // addition to the current block-based flow-graph, rather than
     // have to put traversals like this here?
-    match decl {
-        None => {}
-        Some(decl) => add_entries_from_fn_decl(&mut index, decl, cfg.entry)
+    if let Some(body) = body {
+        add_entries_from_fn_body(&mut index, body, cfg.entry);
     }
 
     cfg.graph.each_node(|node_idx, node| {
@@ -182,18 +184,26 @@ fn build_nodeid_to_index(decl: Option<&hir::FnDecl>,
 
     return index;
 
-    fn add_entries_from_fn_decl(index: &mut NodeMap<Vec<CFGIndex>>,
-                                decl: &hir::FnDecl,
+    /// Add mappings from the ast nodes for the formal bindings to
+    /// the entry-node in the graph.
+    fn add_entries_from_fn_body(index: &mut NodeMap<Vec<CFGIndex>>,
+                                body: &hir::Body,
                                 entry: CFGIndex) {
-        //! add mappings from the ast nodes for the formal bindings to
-        //! the entry-node in the graph.
+        use hir::intravisit::Visitor;
+
         struct Formals<'a> {
             entry: CFGIndex,
             index: &'a mut NodeMap<Vec<CFGIndex>>,
         }
         let mut formals = Formals { entry: entry, index: index };
-        intravisit::walk_fn_decl(&mut formals, decl);
-        impl<'a, 'v> intravisit::Visitor<'v> for Formals<'a> {
+        for arg in &body.arguments {
+            formals.visit_pat(&arg.pat);
+        }
+        impl<'a, 'v> Visitor<'v> for Formals<'a> {
+            fn nested_visit_map<'this>(&'this mut self) -> intravisit::NestedVisitorMap<'this, 'v> {
+                intravisit::NestedVisitorMap::None
+            }
+
             fn visit_pat(&mut self, p: &hir::Pat) {
                 self.index.entry(p.id).or_insert(vec![]).push(self.entry);
                 intravisit::walk_pat(self, p)
@@ -222,14 +232,15 @@ pub enum KillFrom {
 }
 
 impl<'a, 'tcx, O:DataFlowOperator> DataFlowContext<'a, 'tcx, O> {
-    pub fn new(tcx: &'a ty::ctxt<'tcx>,
+    pub fn new(tcx: TyCtxt<'a, 'tcx, 'tcx>,
                analysis_name: &'static str,
-               decl: Option<&hir::FnDecl>,
+               body: Option<&hir::Body>,
                cfg: &cfg::CFG,
                oper: O,
                id_range: IdRange,
                bits_per_id: usize) -> DataFlowContext<'a, 'tcx, O> {
-        let words_per_id = (bits_per_id + usize::BITS - 1) / usize::BITS;
+        let usize_bits = mem::size_of::<usize>() * 8;
+        let words_per_id = (bits_per_id + usize_bits - 1) / usize_bits;
         let num_nodes = cfg.graph.all_nodes().len();
 
         debug!("DataFlowContext::new(analysis_name: {}, id_range={:?}, \
@@ -246,7 +257,7 @@ impl<'a, 'tcx, O:DataFlowOperator> DataFlowContext<'a, 'tcx, O> {
         let kills2 = zeroes;
         let on_entry = vec![entry; num_nodes * words_per_id];
 
-        let nodeid_to_index = build_nodeid_to_index(decl, cfg);
+        let nodeid_to_index = build_nodeid_to_index(body, cfg);
 
         DataFlowContext {
             tcx: tcx,
@@ -408,10 +419,11 @@ impl<'a, 'tcx, O:DataFlowOperator> DataFlowContext<'a, 'tcx, O> {
         //! Returns false on the first call to `f` that returns false;
         //! if all calls to `f` return true, then returns true.
 
+        let usize_bits = mem::size_of::<usize>() * 8;
         for (word_index, &word) in words.iter().enumerate() {
             if word != 0 {
-                let base_index = word_index * usize::BITS;
-                for offset in 0..usize::BITS {
+                let base_index = word_index * usize_bits;
+                for offset in 0..usize_bits {
                     let bit = 1 << offset;
                     if (word & bit) != 0 {
                         // NB: we round up the total number of bits
@@ -486,7 +498,7 @@ impl<'a, 'tcx, O:DataFlowOperator> DataFlowContext<'a, 'tcx, O> {
                 let bits = &mut self.scope_kills[start.. end];
                 debug!("{} add_kills_from_flow_exits flow_exit={:?} bits={} [before]",
                        self.analysis_name, flow_exit, mut_bits_to_string(bits));
-                bits.clone_from_slice(&orig_kills[..]);
+                bits.copy_from_slice(&orig_kills[..]);
                 debug!("{} add_kills_from_flow_exits flow_exit={:?} bits={} [after]",
                        self.analysis_name, flow_exit, mut_bits_to_string(bits));
             }
@@ -497,7 +509,7 @@ impl<'a, 'tcx, O:DataFlowOperator> DataFlowContext<'a, 'tcx, O> {
 
 impl<'a, 'tcx, O:DataFlowOperator+Clone+'static> DataFlowContext<'a, 'tcx, O> {
 //                                ^^^^^^^^^^^^^ only needed for pretty printing
-    pub fn propagate(&mut self, cfg: &cfg::CFG, blk: &hir::Block) {
+    pub fn propagate(&mut self, cfg: &cfg::CFG, body: &hir::Body) {
         //! Performs the data flow analysis.
 
         if self.bits_per_id == 0 {
@@ -521,21 +533,11 @@ impl<'a, 'tcx, O:DataFlowOperator+Clone+'static> DataFlowContext<'a, 'tcx, O> {
         }
 
         debug!("Dataflow result for {}:", self.analysis_name);
-        debug!("{}", {
-            let mut v = Vec::new();
-            self.pretty_print_to(box &mut v, blk).unwrap();
-            println!("{}", String::from_utf8(v).unwrap());
-            ""
-        });
-    }
-
-    fn pretty_print_to<'b>(&self, wr: Box<io::Write + 'b>,
-                           blk: &hir::Block) -> io::Result<()> {
-        let mut ps = pprust::rust_printer_annotated(wr, self, None);
-        try!(ps.cbox(pprust::indent_unit));
-        try!(ps.ibox(0));
-        try!(ps.print_block(blk));
-        pp::eof(&mut ps.s)
+        debug!("{}", pprust::to_string(self, |s| {
+            s.cbox(pprust::indent_unit)?;
+            s.ibox(0)?;
+            s.print_expr(&body.value)
+        }));
     }
 }
 
@@ -554,7 +556,7 @@ impl<'a, 'b, 'tcx, O:DataFlowOperator> PropagationContext<'a, 'b, 'tcx, O> {
             let (start, end) = self.dfcx.compute_id_range(node_index);
 
             // Initialize local bitvector with state on-entry.
-            in_out.clone_from_slice(&self.dfcx.on_entry[start.. end]);
+            in_out.copy_from_slice(&self.dfcx.on_entry[start.. end]);
 
             // Compute state on-exit by applying transfer function to
             // state on-entry.
@@ -618,7 +620,7 @@ fn bits_to_string(words: &[usize]) -> String {
 
     for &word in words {
         let mut v = word;
-        for _ in 0..usize::BYTES {
+        for _ in 0..mem::size_of::<usize>() {
             result.push(sep);
             result.push_str(&format!("{:02x}", v & 0xFF));
             v >>= 8;
@@ -647,10 +649,11 @@ fn bitwise<Op:BitwiseOperator>(out_vec: &mut [usize],
 fn set_bit(words: &mut [usize], bit: usize) -> bool {
     debug!("set_bit: words={} bit={}",
            mut_bits_to_string(words), bit_str(bit));
-    let word = bit / usize::BITS;
-    let bit_in_word = bit % usize::BITS;
+    let usize_bits = mem::size_of::<usize>() * 8;
+    let word = bit / usize_bits;
+    let bit_in_word = bit % usize_bits;
     let bit_mask = 1 << bit_in_word;
-    debug!("word={} bit_in_word={} bit_mask={}", word, bit_in_word, word);
+    debug!("word={} bit_in_word={} bit_mask={}", word, bit_in_word, bit_mask);
     let oldv = words[word];
     let newv = oldv | bit_mask;
     words[word] = newv;
@@ -658,8 +661,8 @@ fn set_bit(words: &mut [usize], bit: usize) -> bool {
 }
 
 fn bit_str(bit: usize) -> String {
-    let byte = bit >> 8;
-    let lobits = 1 << (bit & 0xFF);
+    let byte = bit >> 3;
+    let lobits = 1 << (bit & 0b111);
     format!("[{}:{}-{:02x}]", bit, byte, lobits)
 }
 

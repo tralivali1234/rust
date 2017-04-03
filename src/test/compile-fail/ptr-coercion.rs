@@ -15,19 +15,19 @@ pub fn main() {
     // *const -> *mut
     let x: *const isize = &42;
     let x: *mut isize = x; //~  ERROR mismatched types
-                           //~| expected `*mut isize`
-                           //~| found `*const isize`
-                           //~| values differ in mutability
+                           //~| expected type `*mut isize`
+                           //~| found type `*const isize`
+                           //~| types differ in mutability
 
     // & -> *mut
     let x: *mut isize = &42; //~  ERROR mismatched types
-                             //~| expected `*mut isize`
-                             //~| found `&isize`
-                             //~| values differ in mutability
+                             //~| expected type `*mut isize`
+                             //~| found type `&isize`
+                             //~| types differ in mutability
 
     let x: *const isize = &42;
     let x: *mut isize = x; //~  ERROR mismatched types
-                           //~| expected `*mut isize`
-                           //~| found `*const isize`
-                           //~| values differ in mutability
+                           //~| expected type `*mut isize`
+                           //~| found type `*const isize`
+                           //~| types differ in mutability
 }

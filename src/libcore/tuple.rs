@@ -8,36 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-//! A finite heterogeneous sequence, `(T, U, ..)`
-//!
-//! To access a single element of a tuple one can use the `.0`
-//! field access syntax.
-//!
-//! Indexing starts from zero, so `.0` returns first value, `.1`
-//! returns second value, and so on. In general, a tuple with *N*
-//! elements has field accessors from 0 to *N* - 1.
-//!
-//! If every type inside a tuple implements one of the following
-//! traits, then a tuple itself also implements it.
-//!
-//! * `Clone`
-//! * `PartialEq`
-//! * `Eq`
-//! * `PartialOrd`
-//! * `Ord`
-//! * `Default`
+// See src/libstd/primitive_docs.rs for documentation.
 
-use clone::Clone;
 use cmp::*;
 use cmp::Ordering::*;
-use default::Default;
-use option::Option;
-use option::Option::Some;
-
-// FIXME(#19630) Remove this work-around
-macro_rules! e {
-    ($e:expr) => { $e }
-}
 
 // macro for implementing n-ary tuple functions and operations
 macro_rules! tuple_impls {
@@ -50,7 +24,7 @@ macro_rules! tuple_impls {
             #[stable(feature = "rust1", since = "1.0.0")]
             impl<$($T:Clone),+> Clone for ($($T,)+) {
                 fn clone(&self) -> ($($T,)+) {
-                    ($(e!(self.$idx.clone()),)+)
+                    ($(self.$idx.clone(),)+)
                 }
             }
 
@@ -58,11 +32,11 @@ macro_rules! tuple_impls {
             impl<$($T:PartialEq),+> PartialEq for ($($T,)+) {
                 #[inline]
                 fn eq(&self, other: &($($T,)+)) -> bool {
-                    e!($(self.$idx == other.$idx)&&+)
+                    $(self.$idx == other.$idx)&&+
                 }
                 #[inline]
                 fn ne(&self, other: &($($T,)+)) -> bool {
-                    e!($(self.$idx != other.$idx)||+)
+                    $(self.$idx != other.$idx)||+
                 }
             }
 

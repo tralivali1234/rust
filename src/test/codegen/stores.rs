@@ -23,25 +23,26 @@ pub struct Bytes {
 // The array is stored as i32, but its alignment is lower, go with 1 byte to avoid target
 // dependent alignment
 #[no_mangle]
-pub fn small_array_alignment(x: &mut [i8; 4]) {
-// CHECK: [[VAR:%[0-9]+]] = load {{(\[4 x i8\]\*, )?}}[4 x i8]** %x
-// CHECK: [[VAR2:%[0-9]+]] = bitcast [4 x i8]* [[VAR]] to i32*
-// CHECK: store i32 %{{.*}}, i32* [[VAR2]], align 1
-    *x = [0; 4];
+pub fn small_array_alignment(x: &mut [i8; 4], y: [i8; 4]) {
+// CHECK: [[TMP:%.+]] = alloca i32
+// CHECK: %arg1 = alloca [4 x i8]
+// CHECK: store i32 %1, i32* [[TMP]]
+// CHECK: [[Y8:%[0-9]+]] = bitcast [4 x i8]* %arg1 to i8*
+// CHECK: [[TMP8:%[0-9]+]] = bitcast i32* [[TMP]] to i8*
+// CHECK: call void @llvm.memcpy.{{.*}}(i8* [[Y8]], i8* [[TMP8]], i{{[0-9]+}} 4, i32 1, i1 false)
+    *x = y;
 }
 
 // CHECK-LABEL: small_struct_alignment
 // The struct is stored as i32, but its alignment is lower, go with 1 byte to avoid target
 // dependent alignment
 #[no_mangle]
-pub fn small_struct_alignment(x: &mut Bytes) {
-// CHECK: [[VAR:%[0-9]+]] = load {{(%Bytes\*, )?}}%Bytes** %x
-// CHECK: [[VAR2:%[0-9]+]] = bitcast %Bytes* [[VAR]] to i32*
-// CHECK: store i32 %{{.*}}, i32* [[VAR2]], align 1
-    *x = Bytes {
-        a: 0,
-        b: 0,
-        c: 0,
-        d: 0,
-    };
+pub fn small_struct_alignment(x: &mut Bytes, y: Bytes) {
+// CHECK: [[TMP:%.+]] = alloca i32
+// CHECK: %arg1 = alloca %Bytes
+// CHECK: store i32 %1, i32* [[TMP]]
+// CHECK: [[Y8:%[0-9]+]] = bitcast %Bytes* %arg1 to i8*
+// CHECK: [[TMP8:%[0-9]+]] = bitcast i32* [[TMP]] to i8*
+// CHECK: call void @llvm.memcpy.{{.*}}(i8* [[Y8]], i8* [[TMP8]], i{{[0-9]+}} 4, i32 1, i1 false)
+    *x = y;
 }

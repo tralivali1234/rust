@@ -8,5 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-fn avg<T=T::Item>(_: T) {} //~ ERROR associated type `Item` not found for `T`
+#![feature(default_type_parameter_fallback)]
+
+fn avg<T=T::Item>(_: T) {}
+//~^ ERROR type parameters with a default cannot use forward declared identifiers
+
 fn main() {}

@@ -134,9 +134,9 @@
 // senders. Under the hood, however, there are actually three flavors of
 // channels in play.
 //
-// * Flavor::Oneshots - these channels are highly optimized for the one-send use case.
-//              They contain as few atomics as possible and involve one and
-//              exactly one allocation.
+// * Flavor::Oneshots - these channels are highly optimized for the one-send use
+//                      case. They contain as few atomics as possible and
+//                      involve one and exactly one allocation.
 // * Streams - these channels are optimized for the non-shared use case. They
 //             use a different concurrent queue that is more tailored for this
 //             use case. The initial allocation of this flavor of channel is not
@@ -148,9 +148,9 @@
 //
 // ## Concurrent queues
 //
-// The basic idea of Rust's Sender/Receiver types is that send() never blocks, but
-// recv() obviously blocks. This means that under the hood there must be some
-// shared and concurrent queue holding all of the actual data.
+// The basic idea of Rust's Sender/Receiver types is that send() never blocks,
+// but recv() obviously blocks. This means that under the hood there must be
+// some shared and concurrent queue holding all of the actual data.
 //
 // With two flavors of channels, two flavors of queues are also used. We have
 // chosen to use queues from a well-known author that are abbreviated as SPSC
@@ -270,7 +270,7 @@ use error;
 use fmt;
 use mem;
 use cell::UnsafeCell;
-use marker::Reflect;
+use time::{Duration, Instant};
 
 #[unstable(feature = "mpsc_select", issue = "27800")]
 pub use self::select::{Select, Handle};
@@ -299,11 +299,27 @@ pub struct Receiver<T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<T: Send> Send for Receiver<T> { }
 
+#[stable(feature = "rust1", since = "1.0.0")]
+impl<T> !Sync for Receiver<T> { }
+
 /// An iterator over messages on a receiver, this iterator will block
 /// whenever `next` is called, waiting for a new message, and `None` will be
 /// returned when the corresponding channel has hung up.
 #[stable(feature = "rust1", since = "1.0.0")]
+#[derive(Debug)]
 pub struct Iter<'a, T: 'a> {
+    rx: &'a Receiver<T>
+}
+
+/// An iterator that attempts to yield all pending values for a receiver.
+/// `None` will be returned when there are no pending values remaining or
+/// if the corresponding channel has hung up.
+///
+/// This Iterator will never block the caller in order to wait for data to
+/// become available. Instead, it will return `None`.
+#[stable(feature = "receiver_try_iter", since = "1.15.0")]
+#[derive(Debug)]
+pub struct TryIter<'a, T: 'a> {
     rx: &'a Receiver<T>
 }
 
@@ -311,6 +327,7 @@ pub struct Iter<'a, T: 'a> {
 /// whenever `next` is called, waiting for a new message, and `None` will be
 /// returned when the corresponding channel has hung up.
 #[stable(feature = "receiver_into_iter", since = "1.1.0")]
+#[derive(Debug)]
 pub struct IntoIter<T> {
     rx: Receiver<T>
 }
@@ -327,11 +344,14 @@ pub struct Sender<T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 unsafe impl<T: Send> Send for Sender<T> { }
 
+#[stable(feature = "rust1", since = "1.0.0")]
+impl<T> !Sync for Sender<T> { }
+
 /// The sending-half of Rust's synchronous channel type. This half can only be
 /// owned by one thread, but it can be cloned to send to other threads.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct SyncSender<T> {
-    inner: Arc<UnsafeCell<sync::Packet<T>>>,
+    inner: Arc<sync::Packet<T>>,
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -373,6 +393,21 @@ pub enum TryRecvError {
     Disconnected,
 }
 
+/// This enumeration is the list of possible errors that `recv_timeout` could
+/// not return data when called.
+#[derive(PartialEq, Eq, Clone, Copy, Debug)]
+#[stable(feature = "mpsc_recv_timeout", since = "1.12.0")]
+pub enum RecvTimeoutError {
+    /// This channel is currently empty, but the sender(s) have not yet
+    /// disconnected, so data may yet become available.
+    #[stable(feature = "mpsc_recv_timeout", since = "1.12.0")]
+    Timeout,
+    /// This channel's sending half has become disconnected, and there will
+    /// never be any more data received on this channel
+    #[stable(feature = "mpsc_recv_timeout", since = "1.12.0")]
+    Disconnected,
+}
+
 /// This enumeration is the list of the possible error outcomes for the
 /// `SyncSender::try_send` method.
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -385,28 +420,28 @@ pub enum TrySendError<T> {
     /// this is not a buffered channel, then there is no receiver available to
     /// acquire the data.
     #[stable(feature = "rust1", since = "1.0.0")]
-    Full(T),
+    Full(#[stable(feature = "rust1", since = "1.0.0")] T),
 
     /// This channel's receiving half has disconnected, so the data could not be
     /// sent. The data is returned back to the callee in this case.
     #[stable(feature = "rust1", since = "1.0.0")]
-    Disconnected(T),
+    Disconnected(#[stable(feature = "rust1", since = "1.0.0")] T),
 }
 
 enum Flavor<T> {
-    Oneshot(Arc<UnsafeCell<oneshot::Packet<T>>>),
-    Stream(Arc<UnsafeCell<stream::Packet<T>>>),
-    Shared(Arc<UnsafeCell<shared::Packet<T>>>),
-    Sync(Arc<UnsafeCell<sync::Packet<T>>>),
+    Oneshot(Arc<oneshot::Packet<T>>),
+    Stream(Arc<stream::Packet<T>>),
+    Shared(Arc<shared::Packet<T>>),
+    Sync(Arc<sync::Packet<T>>),
 }
 
 #[doc(hidden)]
 trait UnsafeFlavor<T> {
     fn inner_unsafe(&self) -> &UnsafeCell<Flavor<T>>;
-    unsafe fn inner_mut<'a>(&'a self) -> &'a mut Flavor<T> {
+    unsafe fn inner_mut(&self) -> &mut Flavor<T> {
         &mut *self.inner_unsafe().get()
     }
-    unsafe fn inner<'a>(&'a self) -> &'a Flavor<T> {
+    unsafe fn inner(&self) -> &Flavor<T> {
         &*self.inner_unsafe().get()
     }
 }
@@ -422,9 +457,15 @@ impl<T> UnsafeFlavor<T> for Receiver<T> {
 }
 
 /// Creates a new asynchronous channel, returning the sender/receiver halves.
-///
 /// All data sent on the sender will become available on the receiver, and no
 /// send will block the calling thread (this channel has an "infinite buffer").
+///
+/// If the [`Receiver`] is disconnected while trying to [`send`] with the
+/// [`Sender`], the [`send`] method will return an error.
+///
+/// [`send`]: ../../../std/sync/mpsc/struct.Sender.html#method.send
+/// [`Sender`]: ../../../std/sync/mpsc/struct.Sender.html
+/// [`Receiver`]: ../../../std/sync/mpsc/struct.Receiver.html
 ///
 /// # Examples
 ///
@@ -449,24 +490,29 @@ impl<T> UnsafeFlavor<T> for Receiver<T> {
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    let a = Arc::new(UnsafeCell::new(oneshot::Packet::new()));
+    let a = Arc::new(oneshot::Packet::new());
     (Sender::new(Flavor::Oneshot(a.clone())), Receiver::new(Flavor::Oneshot(a)))
 }
 
 /// Creates a new synchronous, bounded channel.
 ///
-/// Like asynchronous channels, the `Receiver` will block until a message
+/// Like asynchronous channels, the [`Receiver`] will block until a message
 /// becomes available. These channels differ greatly in the semantics of the
 /// sender from asynchronous channels, however.
 ///
-/// This channel has an internal buffer on which messages will be queued. When
-/// the internal buffer becomes full, future sends will *block* waiting for the
-/// buffer to open up. Note that a buffer size of 0 is valid, in which case this
-/// becomes  "rendezvous channel" where each send will not return until a recv
-/// is paired with it.
+/// This channel has an internal buffer on which messages will be queued.
+/// `bound` specifies the buffer size. When the internal buffer becomes full,
+/// future sends will *block* waiting for the buffer to open up. Note that a
+/// buffer size of 0 is valid, in which case this becomes "rendezvous channel"
+/// where each [`send`] will not return until a recv is paired with it.
 ///
-/// As with asynchronous channels, all senders will panic in `send` if the
-/// `Receiver` has been destroyed.
+/// Like asynchronous channels, if the [`Receiver`] is disconnected while
+/// trying to [`send`] with the [`SyncSender`], the [`send`] method will
+/// return an error.
+///
+/// [`send`]: ../../../std/sync/mpsc/struct.SyncSender.html#method.send
+/// [`SyncSender`]: ../../../std/sync/mpsc/struct.SyncSender.html
+/// [`Receiver`]: ../../../std/sync/mpsc/struct.Receiver.html
 ///
 /// # Examples
 ///
@@ -489,7 +535,7 @@ pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn sync_channel<T>(bound: usize) -> (SyncSender<T>, Receiver<T>) {
-    let a = Arc::new(UnsafeCell::new(sync::Packet::new(bound)));
+    let a = Arc::new(sync::Packet::new(bound));
     (SyncSender::new(a.clone()), Receiver::new(Flavor::Sync(a)))
 }
 
@@ -529,44 +575,36 @@ impl<T> Sender<T> {
     ///
     /// // This send will fail because the receiver is gone
     /// drop(rx);
-    /// assert_eq!(tx.send(1).err().unwrap().0, 1);
+    /// assert_eq!(tx.send(1).unwrap_err().0, 1);
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn send(&self, t: T) -> Result<(), SendError<T>> {
         let (new_inner, ret) = match *unsafe { self.inner() } {
             Flavor::Oneshot(ref p) => {
-                unsafe {
-                    let p = p.get();
-                    if !(*p).sent() {
-                        return (*p).send(t).map_err(SendError);
-                    } else {
-                        let a =
-                            Arc::new(UnsafeCell::new(stream::Packet::new()));
-                        let rx = Receiver::new(Flavor::Stream(a.clone()));
-                        match (*p).upgrade(rx) {
-                            oneshot::UpSuccess => {
-                                let ret = (*a.get()).send(t);
-                                (a, ret)
-                            }
-                            oneshot::UpDisconnected => (a, Err(t)),
-                            oneshot::UpWoke(token) => {
-                                // This send cannot panic because the thread is
-                                // asleep (we're looking at it), so the receiver
-                                // can't go away.
-                                (*a.get()).send(t).ok().unwrap();
-                                token.signal();
-                                (a, Ok(()))
-                            }
+                if !p.sent() {
+                    return p.send(t).map_err(SendError);
+                } else {
+                    let a = Arc::new(stream::Packet::new());
+                    let rx = Receiver::new(Flavor::Stream(a.clone()));
+                    match p.upgrade(rx) {
+                        oneshot::UpSuccess => {
+                            let ret = a.send(t);
+                            (a, ret)
+                        }
+                        oneshot::UpDisconnected => (a, Err(t)),
+                        oneshot::UpWoke(token) => {
+                            // This send cannot panic because the thread is
+                            // asleep (we're looking at it), so the receiver
+                            // can't go away.
+                            a.send(t).ok().unwrap();
+                            token.signal();
+                            (a, Ok(()))
                         }
                     }
                 }
             }
-            Flavor::Stream(ref p) => return unsafe {
-                (*p.get()).send(t).map_err(SendError)
-            },
-            Flavor::Shared(ref p) => return unsafe {
-                (*p.get()).send(t).map_err(SendError)
-            },
+            Flavor::Stream(ref p) => return p.send(t).map_err(SendError),
+            Flavor::Shared(ref p) => return p.send(t).map_err(SendError),
             Flavor::Sync(..) => unreachable!(),
         };
 
@@ -581,41 +619,43 @@ impl<T> Sender<T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Clone for Sender<T> {
     fn clone(&self) -> Sender<T> {
-        let (packet, sleeper, guard) = match *unsafe { self.inner() } {
+        let packet = match *unsafe { self.inner() } {
             Flavor::Oneshot(ref p) => {
-                let a = Arc::new(UnsafeCell::new(shared::Packet::new()));
-                unsafe {
-                    let guard = (*a.get()).postinit_lock();
+                let a = Arc::new(shared::Packet::new());
+                {
+                    let guard = a.postinit_lock();
                     let rx = Receiver::new(Flavor::Shared(a.clone()));
-                    match (*p.get()).upgrade(rx) {
+                    let sleeper = match p.upgrade(rx) {
                         oneshot::UpSuccess |
-                        oneshot::UpDisconnected => (a, None, guard),
-                        oneshot::UpWoke(task) => (a, Some(task), guard)
-                    }
+                        oneshot::UpDisconnected => None,
+                        oneshot::UpWoke(task) => Some(task),
+                    };
+                    a.inherit_blocker(sleeper, guard);
                 }
+                a
             }
             Flavor::Stream(ref p) => {
-                let a = Arc::new(UnsafeCell::new(shared::Packet::new()));
-                unsafe {
-                    let guard = (*a.get()).postinit_lock();
+                let a = Arc::new(shared::Packet::new());
+                {
+                    let guard = a.postinit_lock();
                     let rx = Receiver::new(Flavor::Shared(a.clone()));
-                    match (*p.get()).upgrade(rx) {
+                    let sleeper = match p.upgrade(rx) {
                         stream::UpSuccess |
-                        stream::UpDisconnected => (a, None, guard),
-                        stream::UpWoke(task) => (a, Some(task), guard),
-                    }
+                        stream::UpDisconnected => None,
+                        stream::UpWoke(task) => Some(task),
+                    };
+                    a.inherit_blocker(sleeper, guard);
                 }
+                a
             }
             Flavor::Shared(ref p) => {
-                unsafe { (*p.get()).clone_chan(); }
+                p.clone_chan();
                 return Sender::new(Flavor::Shared(p.clone()));
             }
             Flavor::Sync(..) => unreachable!(),
         };
 
         unsafe {
-            (*packet.get()).inherit_blocker(sleeper, guard);
-
             let tmp = Sender::new(Flavor::Shared(packet.clone()));
             mem::swap(self.inner_mut(), tmp.inner_mut());
         }
@@ -626,12 +666,19 @@ impl<T> Clone for Sender<T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Drop for Sender<T> {
     fn drop(&mut self) {
-        match *unsafe { self.inner_mut() } {
-            Flavor::Oneshot(ref mut p) => unsafe { (*p.get()).drop_chan(); },
-            Flavor::Stream(ref mut p) => unsafe { (*p.get()).drop_chan(); },
-            Flavor::Shared(ref mut p) => unsafe { (*p.get()).drop_chan(); },
+        match *unsafe { self.inner() } {
+            Flavor::Oneshot(ref p) => p.drop_chan(),
+            Flavor::Stream(ref p) => p.drop_chan(),
+            Flavor::Shared(ref p) => p.drop_chan(),
             Flavor::Sync(..) => unreachable!(),
         }
+    }
+}
+
+#[stable(feature = "mpsc_debug", since = "1.7.0")]
+impl<T> fmt::Debug for Sender<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Sender {{ .. }}")
     }
 }
 
@@ -640,7 +687,7 @@ impl<T> Drop for Sender<T> {
 ////////////////////////////////////////////////////////////////////////////////
 
 impl<T> SyncSender<T> {
-    fn new(inner: Arc<UnsafeCell<sync::Packet<T>>>) -> SyncSender<T> {
+    fn new(inner: Arc<sync::Packet<T>>) -> SyncSender<T> {
         SyncSender { inner: inner }
     }
 
@@ -660,7 +707,7 @@ impl<T> SyncSender<T> {
     /// information.
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn send(&self, t: T) -> Result<(), SendError<T>> {
-        unsafe { (*self.inner.get()).send(t).map_err(SendError) }
+        self.inner.send(t).map_err(SendError)
     }
 
     /// Attempts to send a value on this channel without blocking.
@@ -674,14 +721,14 @@ impl<T> SyncSender<T> {
     /// receiver has received the data or not if this function is successful.
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn try_send(&self, t: T) -> Result<(), TrySendError<T>> {
-        unsafe { (*self.inner.get()).try_send(t) }
+        self.inner.try_send(t)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Clone for SyncSender<T> {
     fn clone(&self) -> SyncSender<T> {
-        unsafe { (*self.inner.get()).clone_chan(); }
+        self.inner.clone_chan();
         SyncSender::new(self.inner.clone())
     }
 }
@@ -689,7 +736,14 @@ impl<T> Clone for SyncSender<T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Drop for SyncSender<T> {
     fn drop(&mut self) {
-        unsafe { (*self.inner.get()).drop_chan(); }
+        self.inner.drop_chan();
+    }
+}
+
+#[stable(feature = "mpsc_debug", since = "1.7.0")]
+impl<T> fmt::Debug for SyncSender<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SyncSender {{ .. }}")
     }
 }
 
@@ -715,7 +769,7 @@ impl<T> Receiver<T> {
         loop {
             let new_port = match *unsafe { self.inner() } {
                 Flavor::Oneshot(ref p) => {
-                    match unsafe { (*p.get()).try_recv() } {
+                    match p.try_recv() {
                         Ok(t) => return Ok(t),
                         Err(oneshot::Empty) => return Err(TryRecvError::Empty),
                         Err(oneshot::Disconnected) => {
@@ -725,7 +779,7 @@ impl<T> Receiver<T> {
                     }
                 }
                 Flavor::Stream(ref p) => {
-                    match unsafe { (*p.get()).try_recv() } {
+                    match p.try_recv() {
                         Ok(t) => return Ok(t),
                         Err(stream::Empty) => return Err(TryRecvError::Empty),
                         Err(stream::Disconnected) => {
@@ -735,7 +789,7 @@ impl<T> Receiver<T> {
                     }
                 }
                 Flavor::Shared(ref p) => {
-                    match unsafe { (*p.get()).try_recv() } {
+                    match p.try_recv() {
                         Ok(t) => return Ok(t),
                         Err(shared::Empty) => return Err(TryRecvError::Empty),
                         Err(shared::Disconnected) => {
@@ -744,7 +798,7 @@ impl<T> Receiver<T> {
                     }
                 }
                 Flavor::Sync(ref p) => {
-                    match unsafe { (*p.get()).try_recv() } {
+                    match p.try_recv() {
                         Ok(t) => return Ok(t),
                         Err(sync::Empty) => return Err(TryRecvError::Empty),
                         Err(sync::Disconnected) => {
@@ -818,34 +872,122 @@ impl<T> Receiver<T> {
         loop {
             let new_port = match *unsafe { self.inner() } {
                 Flavor::Oneshot(ref p) => {
-                    match unsafe { (*p.get()).recv() } {
+                    match p.recv(None) {
                         Ok(t) => return Ok(t),
-                        Err(oneshot::Empty) => return unreachable!(),
                         Err(oneshot::Disconnected) => return Err(RecvError),
                         Err(oneshot::Upgraded(rx)) => rx,
+                        Err(oneshot::Empty) => unreachable!(),
                     }
                 }
                 Flavor::Stream(ref p) => {
-                    match unsafe { (*p.get()).recv() } {
+                    match p.recv(None) {
                         Ok(t) => return Ok(t),
-                        Err(stream::Empty) => return unreachable!(),
                         Err(stream::Disconnected) => return Err(RecvError),
                         Err(stream::Upgraded(rx)) => rx,
+                        Err(stream::Empty) => unreachable!(),
                     }
                 }
                 Flavor::Shared(ref p) => {
-                    match unsafe { (*p.get()).recv() } {
+                    match p.recv(None) {
                         Ok(t) => return Ok(t),
-                        Err(shared::Empty) => return unreachable!(),
                         Err(shared::Disconnected) => return Err(RecvError),
+                        Err(shared::Empty) => unreachable!(),
                     }
                 }
-                Flavor::Sync(ref p) => return unsafe {
-                    (*p.get()).recv().map_err(|()| RecvError)
-                }
+                Flavor::Sync(ref p) => return p.recv(None).map_err(|_| RecvError),
             };
             unsafe {
                 mem::swap(self.inner_mut(), new_port.inner_mut());
+            }
+        }
+    }
+
+    /// Attempts to wait for a value on this receiver, returning an error if the
+    /// corresponding channel has hung up, or if it waits more than `timeout`.
+    ///
+    /// This function will always block the current thread if there is no data
+    /// available and it's possible for more data to be sent. Once a message is
+    /// sent to the corresponding `Sender`, then this receiver will wake up and
+    /// return that message.
+    ///
+    /// If the corresponding `Sender` has disconnected, or it disconnects while
+    /// this call is blocking, this call will wake up and return `Err` to
+    /// indicate that no more messages can ever be received on this channel.
+    /// However, since channels are buffered, messages sent before the disconnect
+    /// will still be properly received.
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// use std::sync::mpsc::{self, RecvTimeoutError};
+    /// use std::time::Duration;
+    ///
+    /// let (send, recv) = mpsc::channel::<()>();
+    ///
+    /// let timeout = Duration::from_millis(100);
+    /// assert_eq!(Err(RecvTimeoutError::Timeout), recv.recv_timeout(timeout));
+    /// ```
+    #[stable(feature = "mpsc_recv_timeout", since = "1.12.0")]
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<T, RecvTimeoutError> {
+        // Do an optimistic try_recv to avoid the performance impact of
+        // Instant::now() in the full-channel case.
+        match self.try_recv() {
+            Ok(result)
+                => Ok(result),
+            Err(TryRecvError::Disconnected)
+                => Err(RecvTimeoutError::Disconnected),
+            Err(TryRecvError::Empty)
+                => self.recv_max_until(Instant::now() + timeout)
+        }
+    }
+
+    fn recv_max_until(&self, deadline: Instant) -> Result<T, RecvTimeoutError> {
+        use self::RecvTimeoutError::*;
+
+        loop {
+            let port_or_empty = match *unsafe { self.inner() } {
+                Flavor::Oneshot(ref p) => {
+                    match p.recv(Some(deadline)) {
+                        Ok(t) => return Ok(t),
+                        Err(oneshot::Disconnected) => return Err(Disconnected),
+                        Err(oneshot::Upgraded(rx)) => Some(rx),
+                        Err(oneshot::Empty) => None,
+                    }
+                }
+                Flavor::Stream(ref p) => {
+                    match p.recv(Some(deadline)) {
+                        Ok(t) => return Ok(t),
+                        Err(stream::Disconnected) => return Err(Disconnected),
+                        Err(stream::Upgraded(rx)) => Some(rx),
+                        Err(stream::Empty) => None,
+                    }
+                }
+                Flavor::Shared(ref p) => {
+                    match p.recv(Some(deadline)) {
+                        Ok(t) => return Ok(t),
+                        Err(shared::Disconnected) => return Err(Disconnected),
+                        Err(shared::Empty) => None,
+                    }
+                }
+                Flavor::Sync(ref p) => {
+                    match p.recv(Some(deadline)) {
+                        Ok(t) => return Ok(t),
+                        Err(sync::Disconnected) => return Err(Disconnected),
+                        Err(sync::Empty) => None,
+                    }
+                }
+            };
+
+            if let Some(new_port) = port_or_empty {
+                unsafe {
+                    mem::swap(self.inner_mut(), new_port.inner_mut());
+                }
+            }
+
+            // If we're already passed the deadline, and we're here without
+            // data, return a timeout, else try again.
+            if Instant::now() >= deadline {
+                return Err(Timeout);
             }
         }
     }
@@ -856,6 +998,16 @@ impl<T> Receiver<T> {
     pub fn iter(&self) -> Iter<T> {
         Iter { rx: self }
     }
+
+    /// Returns an iterator that will attempt to yield all pending values.
+    /// It will return `None` if there are no more pending values or if the
+    /// channel has hung up. The iterator will never `panic!` or block the
+    /// user by waiting for values.
+    #[stable(feature = "receiver_try_iter", since = "1.15.0")]
+    pub fn try_iter(&self) -> TryIter<T> {
+        TryIter { rx: self }
+    }
+
 }
 
 impl<T> select::Packet for Receiver<T> {
@@ -863,23 +1015,19 @@ impl<T> select::Packet for Receiver<T> {
         loop {
             let new_port = match *unsafe { self.inner() } {
                 Flavor::Oneshot(ref p) => {
-                    match unsafe { (*p.get()).can_recv() } {
+                    match p.can_recv() {
                         Ok(ret) => return ret,
                         Err(upgrade) => upgrade,
                     }
                 }
                 Flavor::Stream(ref p) => {
-                    match unsafe { (*p.get()).can_recv() } {
+                    match p.can_recv() {
                         Ok(ret) => return ret,
                         Err(upgrade) => upgrade,
                     }
                 }
-                Flavor::Shared(ref p) => {
-                    return unsafe { (*p.get()).can_recv() };
-                }
-                Flavor::Sync(ref p) => {
-                    return unsafe { (*p.get()).can_recv() };
-                }
+                Flavor::Shared(ref p) => return p.can_recv(),
+                Flavor::Sync(ref p) => return p.can_recv(),
             };
             unsafe {
                 mem::swap(self.inner_mut(),
@@ -892,25 +1040,21 @@ impl<T> select::Packet for Receiver<T> {
         loop {
             let (t, new_port) = match *unsafe { self.inner() } {
                 Flavor::Oneshot(ref p) => {
-                    match unsafe { (*p.get()).start_selection(token) } {
+                    match p.start_selection(token) {
                         oneshot::SelSuccess => return Installed,
                         oneshot::SelCanceled => return Abort,
                         oneshot::SelUpgraded(t, rx) => (t, rx),
                     }
                 }
                 Flavor::Stream(ref p) => {
-                    match unsafe { (*p.get()).start_selection(token) } {
+                    match p.start_selection(token) {
                         stream::SelSuccess => return Installed,
                         stream::SelCanceled => return Abort,
                         stream::SelUpgraded(t, rx) => (t, rx),
                     }
                 }
-                Flavor::Shared(ref p) => {
-                    return unsafe { (*p.get()).start_selection(token) };
-                }
-                Flavor::Sync(ref p) => {
-                    return unsafe { (*p.get()).start_selection(token) };
-                }
+                Flavor::Shared(ref p) => return p.start_selection(token),
+                Flavor::Sync(ref p) => return p.start_selection(token),
             };
             token = t;
             unsafe {
@@ -923,16 +1067,10 @@ impl<T> select::Packet for Receiver<T> {
         let mut was_upgrade = false;
         loop {
             let result = match *unsafe { self.inner() } {
-                Flavor::Oneshot(ref p) => unsafe { (*p.get()).abort_selection() },
-                Flavor::Stream(ref p) => unsafe {
-                    (*p.get()).abort_selection(was_upgrade)
-                },
-                Flavor::Shared(ref p) => return unsafe {
-                    (*p.get()).abort_selection(was_upgrade)
-                },
-                Flavor::Sync(ref p) => return unsafe {
-                    (*p.get()).abort_selection()
-                },
+                Flavor::Oneshot(ref p) => p.abort_selection(),
+                Flavor::Stream(ref p) => p.abort_selection(was_upgrade),
+                Flavor::Shared(ref p) => return p.abort_selection(was_upgrade),
+                Flavor::Sync(ref p) => return p.abort_selection(),
             };
             let new_port = match result { Ok(b) => return b, Err(p) => p };
             was_upgrade = true;
@@ -949,6 +1087,13 @@ impl<'a, T> Iterator for Iter<'a, T> {
     type Item = T;
 
     fn next(&mut self) -> Option<T> { self.rx.recv().ok() }
+}
+
+#[stable(feature = "receiver_try_iter", since = "1.15.0")]
+impl<'a, T> Iterator for TryIter<'a, T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<T> { self.rx.try_recv().ok() }
 }
 
 #[stable(feature = "receiver_into_iter", since = "1.1.0")]
@@ -978,12 +1123,19 @@ impl <T> IntoIterator for Receiver<T> {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Drop for Receiver<T> {
     fn drop(&mut self) {
-        match *unsafe { self.inner_mut() } {
-            Flavor::Oneshot(ref mut p) => unsafe { (*p.get()).drop_port(); },
-            Flavor::Stream(ref mut p) => unsafe { (*p.get()).drop_port(); },
-            Flavor::Shared(ref mut p) => unsafe { (*p.get()).drop_port(); },
-            Flavor::Sync(ref mut p) => unsafe { (*p.get()).drop_port(); },
+        match *unsafe { self.inner() } {
+            Flavor::Oneshot(ref p) => p.drop_port(),
+            Flavor::Stream(ref p) => p.drop_port(),
+            Flavor::Shared(ref p) => p.drop_port(),
+            Flavor::Sync(ref p) => p.drop_port(),
         }
+    }
+}
+
+#[stable(feature = "mpsc_debug", since = "1.7.0")]
+impl<T> fmt::Debug for Receiver<T> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Receiver {{ .. }}")
     }
 }
 
@@ -1002,7 +1154,7 @@ impl<T> fmt::Display for SendError<T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Send + Reflect> error::Error for SendError<T> {
+impl<T: Send> error::Error for SendError<T> {
     fn description(&self) -> &str {
         "sending on a closed channel"
     }
@@ -1037,7 +1189,7 @@ impl<T> fmt::Display for TrySendError<T> {
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<T: Send + Reflect> error::Error for TrySendError<T> {
+impl<T: Send> error::Error for TrySendError<T> {
 
     fn description(&self) -> &str {
         match *self {
@@ -1107,13 +1259,44 @@ impl error::Error for TryRecvError {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use prelude::v1::*;
+#[stable(feature = "mpsc_recv_timeout_error", since = "1.14.0")]
+impl fmt::Display for RecvTimeoutError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            RecvTimeoutError::Timeout => {
+                "timed out waiting on channel".fmt(f)
+            }
+            RecvTimeoutError::Disconnected => {
+                "channel is empty and sending half is closed".fmt(f)
+            }
+        }
+    }
+}
 
+#[stable(feature = "mpsc_recv_timeout_error", since = "1.14.0")]
+impl error::Error for RecvTimeoutError {
+    fn description(&self) -> &str {
+        match *self {
+            RecvTimeoutError::Timeout => {
+                "timed out waiting on channel"
+            }
+            RecvTimeoutError::Disconnected => {
+                "channel is empty and sending half is closed"
+            }
+        }
+    }
+
+    fn cause(&self) -> Option<&error::Error> {
+        None
+    }
+}
+
+#[cfg(all(test, not(target_os = "emscripten")))]
+mod tests {
     use env;
     use super::*;
     use thread;
+    use time::{Duration, Instant};
 
     pub fn stress_factor() -> usize {
         match env::var("RUST_TEST_STRESS") {
@@ -1513,11 +1696,110 @@ mod tests {
     }
 
     #[test]
+    fn oneshot_single_thread_recv_timeout() {
+        let (tx, rx) = channel();
+        tx.send(()).unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_millis(1)), Ok(()));
+        assert_eq!(rx.recv_timeout(Duration::from_millis(1)), Err(RecvTimeoutError::Timeout));
+        tx.send(()).unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_millis(1)), Ok(()));
+    }
+
+    #[test]
+    fn stress_recv_timeout_two_threads() {
+        let (tx, rx) = channel();
+        let stress = stress_factor() + 100;
+        let timeout = Duration::from_millis(100);
+
+        thread::spawn(move || {
+            for i in 0..stress {
+                if i % 2 == 0 {
+                    thread::sleep(timeout * 2);
+                }
+                tx.send(1usize).unwrap();
+            }
+        });
+
+        let mut recv_count = 0;
+        loop {
+            match rx.recv_timeout(timeout) {
+                Ok(n) => {
+                    assert_eq!(n, 1usize);
+                    recv_count += 1;
+                }
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        assert_eq!(recv_count, stress);
+    }
+
+    #[test]
+    fn recv_timeout_upgrade() {
+        let (tx, rx) = channel::<()>();
+        let timeout = Duration::from_millis(1);
+        let _tx_clone = tx.clone();
+
+        let start = Instant::now();
+        assert_eq!(rx.recv_timeout(timeout), Err(RecvTimeoutError::Timeout));
+        assert!(Instant::now() >= start + timeout);
+    }
+
+    #[test]
+    fn stress_recv_timeout_shared() {
+        let (tx, rx) = channel();
+        let stress = stress_factor() + 100;
+
+        for i in 0..stress {
+            let tx = tx.clone();
+            thread::spawn(move || {
+                thread::sleep(Duration::from_millis(i as u64 * 10));
+                tx.send(1usize).unwrap();
+            });
+        }
+
+        drop(tx);
+
+        let mut recv_count = 0;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(10)) {
+                Ok(n) => {
+                    assert_eq!(n, 1usize);
+                    recv_count += 1;
+                }
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        assert_eq!(recv_count, stress);
+    }
+
+    #[test]
     fn recv_a_lot() {
         // Regression test that we don't run out of stack in scheduler context
         let (tx, rx) = channel();
         for _ in 0..10000 { tx.send(()).unwrap(); }
         for _ in 0..10000 { rx.recv().unwrap(); }
+    }
+
+    #[test]
+    fn shared_recv_timeout() {
+        let (tx, rx) = channel();
+        let total = 5;
+        for _ in 0..total {
+            let tx = tx.clone();
+            thread::spawn(move|| {
+                tx.send(()).unwrap();
+            });
+        }
+
+        for _ in 0..total { rx.recv().unwrap(); }
+
+        assert_eq!(rx.recv_timeout(Duration::from_millis(1)), Err(RecvTimeoutError::Timeout));
+        tx.send(()).unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_millis(1)), Ok(()));
     }
 
     #[test]
@@ -1579,6 +1861,34 @@ mod tests {
         let _ = tx.send(2);
         drop(tx);
         assert_eq!(count_rx.recv().unwrap(), 4);
+    }
+
+    #[test]
+    fn test_recv_try_iter() {
+        let (request_tx, request_rx) = channel();
+        let (response_tx, response_rx) = channel();
+
+        // Request `x`s until we have `6`.
+        let t = thread::spawn(move|| {
+            let mut count = 0;
+            loop {
+                for x in response_rx.try_iter() {
+                    count += x;
+                    if count == 6 {
+                        return count;
+                    }
+                }
+                request_tx.send(()).unwrap();
+            }
+        });
+
+        for _ in request_rx.iter() {
+            if response_tx.send(2).is_err() {
+                break;
+            }
+        }
+
+        assert_eq!(t.join().unwrap(), 6);
     }
 
     #[test]
@@ -1653,15 +1963,21 @@ mod tests {
         // wait for the child thread to exit before we exit
         rx2.recv().unwrap();
     }
+
+    #[test]
+    fn issue_32114() {
+        let (tx, _) = channel();
+        let _ = tx.send(123);
+        assert_eq!(tx.send(123), Err(SendError(123)));
+    }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "emscripten")))]
 mod sync_tests {
-    use prelude::v1::*;
-
     use env;
     use thread;
     use super::*;
+    use time::Duration;
 
     pub fn stress_factor() -> usize {
         match env::var("RUST_TEST_STRESS") {
@@ -1691,6 +2007,14 @@ mod sync_tests {
         let tx = tx.clone();
         tx.send(1).unwrap();
         assert_eq!(rx.recv().unwrap(), 1);
+    }
+
+    #[test]
+    fn recv_timeout() {
+        let (tx, rx) = sync_channel::<i32>(1);
+        assert_eq!(rx.recv_timeout(Duration::from_millis(1)), Err(RecvTimeoutError::Timeout));
+        tx.send(1).unwrap();
+        assert_eq!(rx.recv_timeout(Duration::from_millis(1)), Ok(1));
     }
 
     #[test]
@@ -1772,6 +2096,67 @@ mod sync_tests {
         for _ in 0..10000 {
             assert_eq!(rx.recv().unwrap(), 1);
         }
+    }
+
+    #[test]
+    fn stress_recv_timeout_two_threads() {
+        let (tx, rx) = sync_channel::<i32>(0);
+
+        thread::spawn(move|| {
+            for _ in 0..10000 { tx.send(1).unwrap(); }
+        });
+
+        let mut recv_count = 0;
+        loop {
+            match rx.recv_timeout(Duration::from_millis(1)) {
+                Ok(v) => {
+                    assert_eq!(v, 1);
+                    recv_count += 1;
+                },
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => break,
+            }
+        }
+
+        assert_eq!(recv_count, 10000);
+    }
+
+    #[test]
+    fn stress_recv_timeout_shared() {
+        const AMT: u32 = 1000;
+        const NTHREADS: u32 = 8;
+        let (tx, rx) = sync_channel::<i32>(0);
+        let (dtx, drx) = sync_channel::<()>(0);
+
+        thread::spawn(move|| {
+            let mut recv_count = 0;
+            loop {
+                match rx.recv_timeout(Duration::from_millis(10)) {
+                    Ok(v) => {
+                        assert_eq!(v, 1);
+                        recv_count += 1;
+                    },
+                    Err(RecvTimeoutError::Timeout) => continue,
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
+            }
+
+            assert_eq!(recv_count, AMT * NTHREADS);
+            assert!(rx.try_recv().is_err());
+
+            dtx.send(()).unwrap();
+        });
+
+        for _ in 0..NTHREADS {
+            let tx = tx.clone();
+            thread::spawn(move|| {
+                for _ in 0..AMT { tx.send(1).unwrap(); }
+            });
+        }
+
+        drop(tx);
+
+        drx.recv().unwrap();
     }
 
     #[test]
@@ -1875,6 +2260,15 @@ mod sync_tests {
         let (tx, rx) = sync_channel::<i32>(0);
         drop(tx);
         assert!(rx.recv().is_err());
+    }
+
+    #[test]
+    fn oneshot_single_thread_try_recv_closed_with_data() {
+        let (tx, rx) = sync_channel::<i32>(1);
+        tx.send(10).unwrap();
+        drop(tx);
+        assert_eq!(rx.try_recv(), Ok(10));
+        assert_eq!(rx.try_recv(), Err(TryRecvError::Disconnected));
     }
 
     #[test]
@@ -2198,5 +2592,23 @@ mod sync_tests {
         for _ in 0..100 {
             repro()
         }
+    }
+
+    #[test]
+    fn fmt_debug_sender() {
+        let (tx, _) = channel::<i32>();
+        assert_eq!(format!("{:?}", tx), "Sender { .. }");
+    }
+
+    #[test]
+    fn fmt_debug_recv() {
+        let (_, rx) = channel::<i32>();
+        assert_eq!(format!("{:?}", rx), "Receiver { .. }");
+    }
+
+    #[test]
+    fn fmt_debug_sync_sender() {
+        let (tx, _) = sync_channel::<i32>(1);
+        assert_eq!(format!("{:?}", tx), "SyncSender { .. }");
     }
 }

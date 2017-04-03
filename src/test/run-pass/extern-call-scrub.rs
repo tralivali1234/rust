@@ -12,6 +12,8 @@
 // make sure the stack pointers are maintained properly in both
 // directions
 
+// ignore-emscripten no threads support
+
 #![feature(libc, std_misc)]
 
 extern crate libc;
@@ -20,7 +22,7 @@ use std::thread;
 mod rustrt {
     extern crate libc;
 
-    #[link(name = "rust_test_helpers")]
+    #[link(name = "rust_test_helpers", kind = "static")]
     extern {
         pub fn rust_dbg_call(cb: extern "C" fn(libc::uintptr_t) -> libc::uintptr_t,
                              data: libc::uintptr_t)

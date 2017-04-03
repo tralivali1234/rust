@@ -12,5 +12,6 @@ use std::mem;
 
 fn main() {
     mem::transmute(0);
-    //~^ ERROR type annotations or generic parameter binding required
+    //~^ ERROR type annotations needed [E0282]
+    //~| NOTE cannot infer type for `U`
 }

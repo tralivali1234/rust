@@ -130,7 +130,6 @@ functions.
             reason = "internal routines only exposed for testing",
             issue = "0")]
 
-use prelude::v1::*;
 use i16;
 pub use self::decoder::{decode, DecodableFloat, FullDecoded, Decoded};
 
@@ -210,7 +209,7 @@ impl<'a> Part<'a> {
                     }
                 }
                 Part::Copy(buf) => {
-                    out.clone_from_slice(buf);
+                    out[..buf.len()].copy_from_slice(buf);
                 }
             }
             Some(len)
@@ -222,6 +221,7 @@ impl<'a> Part<'a> {
 
 /// Formatted result containing one or more parts.
 /// This can be written to the byte buffer or converted to the allocated string.
+#[allow(missing_debug_implementations)]
 #[derive(Clone)]
 pub struct Formatted<'a> {
     /// A byte slice representing a sign, either `""`, `"-"` or `"+"`.
@@ -245,7 +245,7 @@ impl<'a> Formatted<'a> {
     /// (It may still leave partially written bytes in the buffer; do not rely on that.)
     pub fn write(&self, out: &mut [u8]) -> Option<usize> {
         if out.len() < self.sign.len() { return None; }
-        out.clone_from_slice(self.sign);
+        out[..self.sign.len()].copy_from_slice(self.sign);
 
         let mut written = self.sign.len();
         for part in self.parts {

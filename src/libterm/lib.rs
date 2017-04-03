@@ -40,13 +40,10 @@
 //! [win]: http://msdn.microsoft.com/en-us/library/windows/desktop/ms682010%28v=vs.85%29.aspx
 //! [ti]: https://en.wikipedia.org/wiki/Terminfo
 
-// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
-#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "term"]
 #![unstable(feature = "rustc_private",
             reason = "use the crates.io `term` library instead",
             issue = "27812")]
-#![cfg_attr(stage0, staged_api)]
 #![crate_type = "rlib"]
 #![crate_type = "dylib"]
 #![doc(html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
@@ -55,6 +52,7 @@
        html_playground_url = "https://play.rust-lang.org/",
        test(attr(deny(warnings))))]
 #![deny(missing_docs)]
+#![deny(warnings)]
 
 #![feature(box_syntax)]
 #![feature(staged_api)]
@@ -77,9 +75,9 @@ pub mod terminfo;
 mod win;
 
 /// Alias for stdout terminals.
-pub type StdoutTerminal = Terminal<Output=Stdout> + Send;
+pub type StdoutTerminal = Terminal<Output = Stdout> + Send;
 /// Alias for stderr terminals.
-pub type StderrTerminal = Terminal<Output=Stderr> + Send;
+pub type StderrTerminal = Terminal<Output = Stderr> + Send;
 
 #[cfg(not(windows))]
 /// Return a Terminal wrapping stdout, or None if a terminal couldn't be
@@ -213,10 +211,10 @@ pub trait Terminal: Write {
     fn reset(&mut self) -> io::Result<bool>;
 
     /// Gets an immutable reference to the stream inside
-    fn get_ref<'a>(&'a self) -> &'a Self::Output;
+    fn get_ref(&self) -> &Self::Output;
 
     /// Gets a mutable reference to the stream inside
-    fn get_mut<'a>(&'a mut self) -> &'a mut Self::Output;
+    fn get_mut(&mut self) -> &mut Self::Output;
 
     /// Returns the contained stream, destroying the `Terminal`
     fn into_inner(self) -> Self::Output where Self: Sized;

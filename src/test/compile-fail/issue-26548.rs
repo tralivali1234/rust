@@ -8,10 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// error-pattern: overflow representing the type `S`
+// error-pattern: overflow representing the type
 
-trait Mirror { type It; }
-impl<T> Mirror for T { type It = Self; }
+
+trait Mirror { type It: ?Sized; }
+impl<T: ?Sized> Mirror for T { type It = Self; }
 struct S(Option<<S as Mirror>::It>);
 
 fn main() {

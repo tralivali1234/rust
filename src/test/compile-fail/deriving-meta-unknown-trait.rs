@@ -8,8 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// ignore-tidy-linelength
+
 #[derive(Eqr)]
-//~^ ERROR `#[derive]` for custom traits is not stable enough for use and is subject to change
+//~^ ERROR cannot find derive macro `Eqr` in this scope
 struct Foo;
 
 pub fn main() {}

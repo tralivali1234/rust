@@ -23,6 +23,7 @@ pub struct Bytes {
 #[no_mangle]
 pub fn borrow(x: &i32) -> &i32 {
 // CHECK: load {{(i32\*, )?}}i32** %x{{.*}}, !nonnull
+    &x; // keep variable in an alloca
     x
 }
 

@@ -8,6 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// ignore-s390x
+// ignore-emscripten
+// ignore-powerpc
+
 #![feature(asm)]
 
 fn foo(x: isize) { println!("{}", x); }

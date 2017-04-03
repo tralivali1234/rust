@@ -11,11 +11,12 @@
 // error-pattern:runned an unexported test
 // compile-flags:--test
 // check-stdout
-// ignore-pretty: does not work well with `--test`
 
 mod m {
-    pub fn exported() { }
+    pub fn exported() {}
 
     #[test]
-    fn unexported() { panic!("runned an unexported test"); }
+    fn unexported() {
+        panic!("runned an unexported test");
+    }
 }

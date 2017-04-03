@@ -8,8 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-
-#![feature(unboxed_closures)]
+// ignore-emscripten no threads support
 
 use std::thread;
 use std::mem;

@@ -8,9 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-fn foo(b: bool) -> Result<bool,String> {
-    Err("bar".to_string());
-    //~^ ERROR type annotations or generic parameter binding required
+fn foo(b: bool) -> Result<bool,String> { //~ ERROR mismatched types
+    Err("bar".to_string()); //~ HELP consider removing this semicolon
 }
 
 fn main() {

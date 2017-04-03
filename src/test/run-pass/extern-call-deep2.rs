@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// ignore-emscripten no threads support
+
 #![feature(libc)]
 
 extern crate libc;
@@ -16,7 +18,7 @@ use std::thread;
 mod rustrt {
     extern crate libc;
 
-    #[link(name = "rust_test_helpers")]
+    #[link(name = "rust_test_helpers", kind = "static")]
     extern {
         pub fn rust_dbg_call(cb: extern "C" fn(libc::uintptr_t) -> libc::uintptr_t,
                              data: libc::uintptr_t)

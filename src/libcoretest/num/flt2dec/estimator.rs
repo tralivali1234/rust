@@ -8,7 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use std::f64;
+// FIXME https://github.com/kripken/emscripten/issues/4563
+// NB we have to actually not compile this test to avoid
+// an undefined symbol error
+#![cfg(not(target_os = "emscripten"))]
+
 use core::num::flt2dec::estimator::*;
 
 #[test]
@@ -54,7 +58,7 @@ fn test_estimate_scaling_factor() {
     assert_almost_eq!(estimate_scaling_factor(0x1fffffffffffff, 971), 309);
 
     for i in -1074..972 {
-        let expected = f64::ldexp(1.0, i).log10().ceil();
+        let expected = super::ldexp_f64(1.0, i).log10().ceil();
         assert_almost_eq!(estimate_scaling_factor(1, i as i16), expected as i16);
     }
 }

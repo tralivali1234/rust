@@ -5,7 +5,7 @@ HOST_RPATH_ENV = \
 TARGET_RPATH_ENV = \
     $(LD_LIB_PATH_ENVVAR)="$(TMPDIR):$(TARGET_RPATH_DIR):$($(LD_LIB_PATH_ENVVAR))"
 
-BARE_RUSTC := $(HOST_RPATH_ENV) $(RUSTC)
+BARE_RUSTC := $(HOST_RPATH_ENV) '$(RUSTC)'
 RUSTC := $(BARE_RUSTC) --out-dir $(TMPDIR) -L $(TMPDIR) $(RUSTFLAGS)
 #CC := $(CC) -L $(TMPDIR)
 HTMLDOCCK := $(PYTHON) $(S)/src/etc/htmldocck.py
@@ -22,9 +22,6 @@ RLIB_GLOB = lib$(1)*.rlib
 BIN = $(1)
 
 UNAME = $(shell uname)
-ifneq (,$(findstring MINGW,$(UNAME)))
-IS_WINDOWS=1
-endif
 
 ifeq ($(UNAME),Darwin)
 RUN = $(TARGET_RPATH_ENV) $(RUN_BINFILE)
@@ -83,6 +80,9 @@ ifeq ($(UNAME),Bitrig)
 	EXTRACFLAGS := -lm -lpthread
 	EXTRACXXFLAGS := -lc++ -lc++abi
 else
+ifeq ($(UNAME),SunOS)
+	EXTRACFLAGS := -lm -lpthread -lposix4 -lsocket
+else
 ifeq ($(UNAME),OpenBSD)
 	EXTRACFLAGS := -lm -lpthread
 	RUSTC := $(RUSTC) -C linker="$(word 1,$(CC:ccache=))"
@@ -94,14 +94,20 @@ endif
 endif
 endif
 endif
+endif
 
 REMOVE_DYLIBS     = rm $(TMPDIR)/$(call DYLIB_GLOB,$(1))
 REMOVE_RLIBS      = rm $(TMPDIR)/$(call RLIB_GLOB,$(1))
 
 %.a: %.o
 	ar crus $@ $<
+ifdef IS_MSVC
+%.lib: lib%.o
+	$(MSVC_LIB) -out:`cygpath -w $@` $<
+else
 %.lib: lib%.o
 	ar crus $@ $<
+endif
 %.dylib: %.o
 	$(CC) -dynamiclib -Wl,-dylib -o $@ $<
 %.so: %.o

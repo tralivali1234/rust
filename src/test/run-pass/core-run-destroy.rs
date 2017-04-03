@@ -8,8 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-pretty
 // compile-flags:--test
+// ignore-emscripten
 
 // NB: These tests kill child processes. Valgrind sees these children as leaking
 // memory, which makes for some *confusing* logs. That's why these are here

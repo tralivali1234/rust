@@ -9,16 +9,18 @@
 // except according to those terms.
 //
 
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Quad { a: u64, b: u64, c: u64, d: u64 }
 
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Floats { a: f64, b: u8, c: f64 }
 
 mod rustrt {
     use super::{Floats, Quad};
 
-    #[link(name = "rust_test_helpers")]
+    #[link(name = "rust_test_helpers", kind = "static")]
     extern {
         pub fn rust_dbg_abi_1(q: Quad) -> Quad;
         pub fn rust_dbg_abi_2(f: Floats) -> Floats;
@@ -43,7 +45,7 @@ fn test1() {
     }
 }
 
-#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
+#[cfg(target_pointer_width = "64")]
 fn test2() {
     unsafe {
         let f = Floats { a: 1.234567890e-15_f64,
@@ -59,7 +61,7 @@ fn test2() {
     }
 }
 
-#[cfg(any(target_arch = "x86", target_arch = "arm"))]
+#[cfg(target_pointer_width = "32")]
 fn test2() {
 }
 

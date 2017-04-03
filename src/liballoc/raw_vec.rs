@@ -16,9 +16,8 @@ use super::oom;
 use super::boxed::Box;
 use core::ops::Drop;
 use core::cmp;
-use core;
 
-/// A low-level utility for more ergonomically allocating, reallocating, and deallocating a
+/// A low-level utility for more ergonomically allocating, reallocating, and deallocating
 /// a buffer of memory on the heap without having to worry about all the corner cases
 /// involved. This type is excellent for building your own data structures like Vec and VecDeque.
 /// In particular:
@@ -45,7 +44,6 @@ use core;
 /// `shrink_to_fit`, and `from_box` will actually set RawVec's private capacity
 /// field. This allows zero-sized types to not be special-cased by consumers of
 /// this type.
-#[unsafe_no_drop_flag]
 pub struct RawVec<T> {
     ptr: Unique<T>,
     cap: usize,
@@ -59,11 +57,7 @@ impl<T> RawVec<T> {
     pub fn new() -> Self {
         unsafe {
             // !0 is usize::MAX. This branch should be stripped at compile time.
-            let cap = if mem::size_of::<T>() == 0 {
-                !0
-            } else {
-                0
-            };
+            let cap = if mem::size_of::<T>() == 0 { !0 } else { 0 };
 
             // heap::EMPTY doubles as "unallocated" and "zero-sized allocation"
             RawVec {
@@ -148,6 +142,7 @@ impl<T> RawVec<T> {
     /// Gets the capacity of the allocation.
     ///
     /// This will always be `usize::MAX` if `T` is zero-sized.
+    #[inline(always)]
     pub fn cap(&self) -> usize {
         if mem::size_of::<T>() == 0 {
             !0
@@ -210,11 +205,7 @@ impl<T> RawVec<T> {
 
             let (new_cap, ptr) = if self.cap == 0 {
                 // skip to 4 because tiny Vec's are dumb; but not if that would cause overflow
-                let new_cap = if elem_size > (!0) / 8 {
-                    1
-                } else {
-                    4
-                };
+                let new_cap = if elem_size > (!0) / 8 { 1 } else { 4 };
                 let ptr = heap::allocate(new_cap * elem_size, align);
                 (new_cap, ptr)
             } else {
@@ -237,6 +228,47 @@ impl<T> RawVec<T> {
 
             self.ptr = Unique::new(ptr as *mut _);
             self.cap = new_cap;
+        }
+    }
+
+    /// Attempts to double the size of the type's backing allocation in place. This is common
+    /// enough to want to do that it's easiest to just have a dedicated method. Slightly
+    /// more efficient logic can be provided for this than the general case.
+    ///
+    /// Returns true if the reallocation attempt has succeeded, or false otherwise.
+    ///
+    /// # Panics
+    ///
+    /// * Panics if T is zero-sized on the assumption that you managed to exhaust
+    ///   all `usize::MAX` slots in your imaginary buffer.
+    /// * Panics on 32-bit platforms if the requested capacity exceeds
+    ///   `isize::MAX` bytes.
+    #[inline(never)]
+    #[cold]
+    pub fn double_in_place(&mut self) -> bool {
+        unsafe {
+            let elem_size = mem::size_of::<T>();
+            let align = mem::align_of::<T>();
+
+            // since we set the capacity to usize::MAX when elem_size is
+            // 0, getting to here necessarily means the RawVec is overfull.
+            assert!(elem_size != 0, "capacity overflow");
+
+            // Since we guarantee that we never allocate more than isize::MAX bytes,
+            // `elem_size * self.cap <= isize::MAX` as a precondition, so this can't overflow
+            let new_cap = 2 * self.cap;
+            let new_alloc_size = new_cap * elem_size;
+
+            alloc_guard(new_alloc_size);
+            let size = heap::reallocate_inplace(self.ptr() as *mut _,
+                                                self.cap * elem_size,
+                                                new_alloc_size,
+                                                align);
+            if size >= new_alloc_size {
+                // We can't directly divide `size`.
+                self.cap = new_cap;
+            }
+            size >= new_alloc_size
         }
     }
 
@@ -300,6 +332,22 @@ impl<T> RawVec<T> {
         }
     }
 
+    /// Calculates the buffer's new size given that it'll hold `used_cap +
+    /// needed_extra_cap` elements. This logic is used in amortized reserve methods.
+    /// Returns `(new_capacity, new_alloc_size)`.
+    fn amortized_new_size(&self, used_cap: usize, needed_extra_cap: usize) -> (usize, usize) {
+        let elem_size = mem::size_of::<T>();
+        // Nothing we can really do about these checks :(
+        let required_cap = used_cap.checked_add(needed_extra_cap)
+            .expect("capacity overflow");
+        // Cannot overflow, because `cap <= isize::MAX`, and type of `cap` is `usize`.
+        let double_cap = self.cap * 2;
+        // `double_cap` guarantees exponential growth.
+        let new_cap = cmp::max(double_cap, required_cap);
+        let new_alloc_size = new_cap.checked_mul(elem_size).expect("capacity overflow");
+        (new_cap, new_alloc_size)
+    }
+
     /// Ensures that the buffer contains at least enough space to hold
     /// `used_cap + needed_extra_cap` elements. If it doesn't already have
     /// enough capacity, will reallocate enough space plus comfortable slack
@@ -360,17 +408,7 @@ impl<T> RawVec<T> {
                 return;
             }
 
-            // Nothing we can really do about these checks :(
-            let required_cap = used_cap.checked_add(needed_extra_cap)
-                                       .expect("capacity overflow");
-
-            // Cannot overflow, because `cap <= isize::MAX`, and type of `cap` is `usize`.
-            let double_cap = self.cap * 2;
-
-            // `double_cap` guarantees exponential growth.
-            let new_cap = cmp::max(double_cap, required_cap);
-
-            let new_alloc_size = new_cap.checked_mul(elem_size).expect("capacity overflow");
+            let (new_cap, new_alloc_size) = self.amortized_new_size(used_cap, needed_extra_cap);
             // FIXME: may crash and burn on over-reserve
             alloc_guard(new_alloc_size);
 
@@ -390,6 +428,55 @@ impl<T> RawVec<T> {
 
             self.ptr = Unique::new(ptr as *mut _);
             self.cap = new_cap;
+        }
+    }
+
+    /// Attempts to ensure that the buffer contains at least enough space to hold
+    /// `used_cap + needed_extra_cap` elements. If it doesn't already have
+    /// enough capacity, will reallocate in place enough space plus comfortable slack
+    /// space to get amortized `O(1)` behaviour. Will limit this behaviour
+    /// if it would needlessly cause itself to panic.
+    ///
+    /// If `used_cap` exceeds `self.cap()`, this may fail to actually allocate
+    /// the requested space. This is not really unsafe, but the unsafe
+    /// code *you* write that relies on the behaviour of this function may break.
+    ///
+    /// Returns true if the reallocation attempt has succeeded, or false otherwise.
+    ///
+    /// # Panics
+    ///
+    /// * Panics if the requested capacity exceeds `usize::MAX` bytes.
+    /// * Panics on 32-bit platforms if the requested capacity exceeds
+    ///   `isize::MAX` bytes.
+    pub fn reserve_in_place(&mut self, used_cap: usize, needed_extra_cap: usize) -> bool {
+        unsafe {
+            let elem_size = mem::size_of::<T>();
+            let align = mem::align_of::<T>();
+
+            // NOTE: we don't early branch on ZSTs here because we want this
+            // to actually catch "asking for more than usize::MAX" in that case.
+            // If we make it past the first branch then we are guaranteed to
+            // panic.
+
+            // Don't actually need any more capacity. If the current `cap` is 0, we can't
+            // reallocate in place.
+            // Wrapping in case they give a bad `used_cap`
+            if self.cap().wrapping_sub(used_cap) >= needed_extra_cap || self.cap == 0 {
+                return false;
+            }
+
+            let (_, new_alloc_size) = self.amortized_new_size(used_cap, needed_extra_cap);
+            // FIXME: may crash and burn on over-reserve
+            alloc_guard(new_alloc_size);
+
+            let size = heap::reallocate_inplace(self.ptr() as *mut _,
+                                                self.cap * elem_size,
+                                                new_alloc_size,
+                                                align);
+            if size >= new_alloc_size {
+                self.cap = new_alloc_size / elem_size;
+            }
+            size >= new_alloc_size
         }
     }
 
@@ -438,8 +525,8 @@ impl<T> RawVec<T> {
     /// Converts the entire buffer into `Box<[T]>`.
     ///
     /// While it is not *strictly* Undefined Behavior to call
-    /// this procedure while some of the RawVec is unintialized,
-    /// it cetainly makes it trivial to trigger it.
+    /// this procedure while some of the RawVec is uninitialized,
+    /// it certainly makes it trivial to trigger it.
     ///
     /// Note that this will correctly reconstitute any `cap` changes
     /// that may have been performed. (see description of type for details)
@@ -450,21 +537,13 @@ impl<T> RawVec<T> {
         mem::forget(self);
         output
     }
-
-    /// This is a stupid name in the hopes that someone will find this in the
-    /// not too distant future and remove it with the rest of
-    /// #[unsafe_no_drop_flag]
-    pub fn unsafe_no_drop_flag_needs_drop(&self) -> bool {
-        self.cap != mem::POST_DROP_USIZE
-    }
 }
 
-impl<T> Drop for RawVec<T> {
-    #[unsafe_destructor_blind_to_params]
+unsafe impl<#[may_dangle] T> Drop for RawVec<T> {
     /// Frees the memory owned by the RawVec *without* trying to Drop its contents.
     fn drop(&mut self) {
         let elem_size = mem::size_of::<T>();
-        if elem_size != 0 && self.cap != 0 && self.unsafe_no_drop_flag_needs_drop() {
+        if elem_size != 0 && self.cap != 0 {
             let align = mem::align_of::<T>();
 
             let num_bytes = elem_size * self.cap;
@@ -482,13 +561,13 @@ impl<T> Drop for RawVec<T> {
 // * We don't overflow `usize::MAX` and actually allocate too little
 //
 // On 64-bit we just need to check for overflow since trying to allocate
-// `> isize::MAX` bytes will surely fail. On 32-bit we need to add an extra
-// guard for this in case we're running on a platform which can use all 4GB in
-// user-space. e.g. PAE or x32
+// `> isize::MAX` bytes will surely fail. On 32-bit and 16-bit we need to add
+// an extra guard for this in case we're running on a platform which can use
+// all 4GB in user-space. e.g. PAE or x32
 
 #[inline]
 fn alloc_guard(alloc_size: usize) {
-    if core::usize::BITS < 64 {
+    if mem::size_of::<usize>() < 8 {
         assert!(alloc_size <= ::core::isize::MAX as usize,
                 "capacity overflow");
     }

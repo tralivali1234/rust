@@ -11,7 +11,6 @@
 #![allow(overflowing_literals)]
 
 use std::{i64, f32, f64};
-use test;
 
 mod parse;
 mod rawfp;
@@ -25,13 +24,11 @@ macro_rules! test_literal {
         let x64: f64 = $x;
         let inputs = &[stringify!($x).into(), format!("{:?}", x64), format!("{:e}", x64)];
         for input in inputs {
-            if input != "inf" {
-                assert_eq!(input.parse(), Ok(x64));
-                assert_eq!(input.parse(), Ok(x32));
-                let neg_input = &format!("-{}", input);
-                assert_eq!(neg_input.parse(), Ok(-x64));
-                assert_eq!(neg_input.parse(), Ok(-x32));
-            }
+            assert_eq!(input.parse(), Ok(x64));
+            assert_eq!(input.parse(), Ok(x32));
+            let neg_input = &format!("-{}", input);
+            assert_eq!(neg_input.parse(), Ok(-x64));
+            assert_eq!(neg_input.parse(), Ok(-x32));
         }
     })
 }
@@ -98,7 +95,8 @@ fn fast_path_correct() {
 
 #[test]
 fn lonely_dot() {
-    assert_eq!(".".parse(), Ok(0.0));
+    assert!(".".parse::<f32>().is_err());
+    assert!(".".parse::<f64>().is_err());
 }
 
 #[test]
@@ -135,58 +133,13 @@ fn massive_exponent() {
     assert_eq!(format!("1e{}000", max).parse(), Ok(f64::INFINITY));
 }
 
-#[bench]
-fn bench_0(b: &mut test::Bencher) {
-    b.iter(|| "0.0".parse::<f64>());
-}
-
-#[bench]
-fn bench_42(b: &mut test::Bencher) {
-    b.iter(|| "42".parse::<f64>());
-}
-
-#[bench]
-fn bench_huge_int(b: &mut test::Bencher) {
-    // 2^128 - 1
-    b.iter(|| "170141183460469231731687303715884105727".parse::<f64>());
-}
-
-#[bench]
-fn bench_short_decimal(b: &mut test::Bencher) {
-    b.iter(|| "1234.5678".parse::<f64>());
-}
-
-#[bench]
-fn bench_pi_long(b: &mut test::Bencher) {
-    b.iter(|| "3.14159265358979323846264338327950288".parse::<f64>());
-}
-
-#[bench]
-fn bench_pi_short(b: &mut test::Bencher) {
-    b.iter(|| "3.141592653589793".parse::<f64>())
-}
-
-#[bench]
-fn bench_1e150(b: &mut test::Bencher) {
-    b.iter(|| "1e150".parse::<f64>());
-}
-
-#[bench]
-fn bench_long_decimal_and_exp(b: &mut test::Bencher) {
-    b.iter(|| "727501488517303786137132964064381141071e-123".parse::<f64>());
-}
-
-#[bench]
-fn bench_min_subnormal(b: &mut test::Bencher) {
-    b.iter(|| "5e-324".parse::<f64>());
-}
-
-#[bench]
-fn bench_min_normal(b: &mut test::Bencher) {
-    b.iter(|| "2.2250738585072014e-308".parse::<f64>());
-}
-
-#[bench]
-fn bench_max(b: &mut test::Bencher) {
-    b.iter(|| "1.7976931348623157e308".parse::<f64>());
+#[test]
+fn borderline_overflow() {
+    let mut s = "0.".to_string();
+    for _ in 0..375 {
+        s.push('3');
+    }
+    // At the time of this writing, this returns Err(..), but this is a bug that should be fixed.
+    // It makes no sense to enshrine that in a test, the important part is that it doesn't panic.
+    let _ = s.parse::<f64>();
 }

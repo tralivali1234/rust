@@ -24,11 +24,12 @@ macro_rules! demo {
             let mut x: isize = 0;
             let y: isize = 1;
 
-            let mut history: History = vec!();
+            let mut history: History = vec![];
             unsafe {
                 asm!("mov ($1), $0"
                      : $output_constraint (*wrap(&mut x, "out", &mut history))
-                     : "r"(&wrap(y, "in", &mut history)));
+                     : "r"(&wrap(y, "in", &mut history))
+                     :: "volatile");
             }
             assert_eq!((x,y), (1,1));
             let b: &[_] = &["out", "in"];

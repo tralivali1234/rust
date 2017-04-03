@@ -8,20 +8,25 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use target::Target;
+use target::{Target, TargetResult};
 
-pub fn target() -> Target {
+pub fn target() -> TargetResult {
     let mut base = super::linux_base::opts();
     base.pre_link_args.push("-m32".to_string());
+    base.max_atomic_width = Some(32);
 
-    Target {
+    // see #36994
+    base.exe_allocation_crate = "alloc_system".to_string();
+
+    Ok(Target {
         llvm_target: "powerpc-unknown-linux-gnu".to_string(),
         target_endian: "big".to_string(),
         target_pointer_width: "32".to_string(),
+        data_layout: "E-m:e-p:32:32-i64:64-n32".to_string(),
         arch: "powerpc".to_string(),
         target_os: "linux".to_string(),
         target_env: "gnu".to_string(),
         target_vendor: "unknown".to_string(),
         options: base,
-    }
+    })
 }

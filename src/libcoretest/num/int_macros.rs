@@ -14,6 +14,8 @@ mod tests {
     use core::$T_i::*;
     use core::isize;
     use core::ops::{Shl, Shr, Not, BitXor, BitAnd, BitOr};
+    use core::mem;
+
     use num;
 
     #[test]
@@ -85,9 +87,10 @@ mod tests {
 
     #[test]
     fn test_count_zeros() {
-        assert!(A.count_zeros() == BITS as u32 - 3);
-        assert!(B.count_zeros() == BITS as u32 - 2);
-        assert!(C.count_zeros() == BITS as u32 - 5);
+        let bits = mem::size_of::<$T>() * 8;
+        assert!(A.count_zeros() == bits as u32 - 3);
+        assert!(B.count_zeros() == bits as u32 - 2);
+        assert!(C.count_zeros() == bits as u32 - 5);
     }
 
     #[test]
@@ -205,11 +208,11 @@ mod tests {
     fn test_pow() {
         let mut r = 2 as $T;
 
-        assert_eq!(r.pow(2u32), 4 as $T);
-        assert_eq!(r.pow(0u32), 1 as $T);
+        assert_eq!(r.pow(2), 4 as $T);
+        assert_eq!(r.pow(0), 1 as $T);
         r = -2 as $T;
-        assert_eq!(r.pow(2u32), 4 as $T);
-        assert_eq!(r.pow(3u32), -8 as $T);
+        assert_eq!(r.pow(2), 4 as $T);
+        assert_eq!(r.pow(3), -8 as $T);
     }
 }
 

@@ -10,13 +10,10 @@
 
 //! Collection types.
 //!
-//! See [std::collections](../std/collections) for a detailed discussion of
+//! See [std::collections](../std/collections/index.html) for a detailed discussion of
 //! collections in Rust.
 
-// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
-#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "collections"]
-#![cfg_attr(stage0, staged_api)]
 #![crate_type = "rlib"]
 #![unstable(feature = "collections",
             reason = "library is unlikely to be stabilized with the current \
@@ -29,50 +26,46 @@
        issue_tracker_base_url = "https://github.com/rust-lang/rust/issues/",
        test(no_crate_inject, attr(allow(unused_variables), deny(warnings))))]
 
-#![allow(trivial_casts)]
 #![cfg_attr(test, allow(deprecated))] // rand
+#![deny(warnings)]
+#![deny(missing_debug_implementations)]
 
-// SNAP 1af31d4
-#![allow(unused_features)]
-// SNAP 1af31d4
-#![allow(unused_attributes)]
-
-#![cfg_attr(stage0, feature(rustc_attrs))]
-#![cfg_attr(stage0, allow(unused_attributes))]
 #![feature(alloc)]
+#![feature(allow_internal_unstable)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
+#![cfg_attr(not(test), feature(char_escape_debug))]
 #![feature(core_intrinsics)]
+#![feature(dropck_eyepatch)]
+#![feature(exact_size_is_empty)]
 #![feature(fmt_internals)]
-#![feature(fmt_radix)]
+#![feature(fused)]
+#![feature(generic_param_attrs)]
 #![feature(heap_api)]
-#![feature(iter_arith)]
-#![feature(iter_arith)]
+#![feature(inclusive_range)]
 #![feature(lang_items)]
-#![feature(num_bits_bytes)]
-#![feature(oom)]
+#![feature(nonzero)]
 #![feature(pattern)]
-#![feature(ptr_as_ref)]
-#![feature(ref_slice)]
-#![feature(slice_bytes)]
+#![feature(placement_in)]
+#![feature(placement_in_syntax)]
+#![feature(placement_new_protocol)]
+#![feature(shared)]
+#![feature(slice_get_slice)]
 #![feature(slice_patterns)]
+#![cfg_attr(not(test), feature(sort_unstable))]
+#![feature(specialization)]
 #![feature(staged_api)]
-#![feature(step_by)]
-#![feature(str_char)]
-#![feature(unboxed_closures)]
+#![feature(str_internals)]
+#![feature(trusted_len)]
 #![feature(unicode)]
 #![feature(unique)]
-#![feature(dropck_parametricity)]
-#![feature(unsafe_no_drop_flag, filling_drop)]
-#![feature(decode_utf16)]
-#![feature(drop_in_place)]
-#![feature(clone_from_slice)]
-#![cfg_attr(test, feature(clone_from_slice, rand, test))]
+#![feature(untagged_unions)]
+#![cfg_attr(not(test), feature(str_checked_slicing))]
+#![cfg_attr(test, feature(rand, test))]
 
-#![cfg_attr(stage0, feature(no_std))]
 #![no_std]
 
-extern crate rustc_unicode;
+extern crate std_unicode;
 extern crate alloc;
 
 #[cfg(test)]
@@ -81,13 +74,22 @@ extern crate std;
 #[cfg(test)]
 extern crate test;
 
+#[doc(no_inline)]
 pub use binary_heap::BinaryHeap;
+#[doc(no_inline)]
 pub use btree_map::BTreeMap;
+#[doc(no_inline)]
 pub use btree_set::BTreeSet;
+#[doc(no_inline)]
 pub use linked_list::LinkedList;
+#[doc(no_inline)]
+#[allow(deprecated)]
 pub use enum_set::EnumSet;
+#[doc(no_inline)]
 pub use vec_deque::VecDeque;
+#[doc(no_inline)]
 pub use string::String;
+#[doc(no_inline)]
 pub use vec::Vec;
 
 // Needed for the vec! macro
@@ -111,12 +113,14 @@ pub mod vec_deque;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub mod btree_map {
+    //! A map based on a B-Tree.
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use btree::map::*;
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub mod btree_set {
+    //! A set based on a B-Tree.
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use btree::set::*;
 }
@@ -127,13 +131,23 @@ mod std {
 }
 
 /// An endpoint of a range of keys.
-#[unstable(feature = "collections_bound", issue = "27787")]
+#[stable(feature = "collections_bound", since = "1.17.0")]
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum Bound<T> {
     /// An inclusive bound.
+    #[stable(feature = "collections_bound", since = "1.17.0")]
     Included(T),
     /// An exclusive bound.
+    #[stable(feature = "collections_bound", since = "1.17.0")]
     Excluded(T),
     /// An infinite endpoint. Indicates that there is no bound in this direction.
+    #[stable(feature = "collections_bound", since = "1.17.0")]
     Unbounded,
+}
+
+/// An intermediate trait for specialization of `Extend`.
+#[doc(hidden)]
+trait SpecExtend<I: IntoIterator> {
+    /// Extends `self` with the contents of the given iterator.
+    fn spec_extend(&mut self, iter: I);
 }

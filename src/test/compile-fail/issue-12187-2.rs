@@ -14,5 +14,6 @@ fn new<'r, T>() -> &'r T {
 
 fn main() {
     let &v = new();
-    //~^ ERROR type annotations or generic parameter binding required
+    //~^ ERROR type annotations needed [E0282]
+    //~| NOTE cannot infer type for `_`
 }

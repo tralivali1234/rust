@@ -11,9 +11,6 @@
 // Test lifetimes are linked properly when we autoslice a vector.
 // Issue #3148.
 
-
-// pretty-expanded FIXME #23616
-
 fn subslice1<'r>(v: &'r [usize]) -> &'r [usize] { v }
 
 fn both<'r>(v: &'r [usize]) -> &'r [usize] {
@@ -21,6 +18,6 @@ fn both<'r>(v: &'r [usize]) -> &'r [usize] {
 }
 
 pub fn main() {
-    let v = vec!(1,2,3);
+    let v = vec![1,2,3];
     both(&v);
 }

@@ -71,6 +71,12 @@ declare_lint! {
 }
 
 declare_lint! {
+    pub UNREACHABLE_PATTERNS,
+    Warn,
+    "detects unreachable patterns"
+}
+
+declare_lint! {
     pub WARNINGS,
     Warn,
     "mass-change the level for lints which produce warnings"
@@ -92,12 +98,6 @@ declare_lint! {
     pub UNKNOWN_CRATE_TYPES,
     Deny,
     "unknown crate type found in #[crate_type] directive"
-}
-
-declare_lint! {
-    pub VARIANT_SIZE_DIFFERENCES,
-    Allow,
-    "detects enums with widely varying variant sizes"
 }
 
 declare_lint! {
@@ -124,6 +124,124 @@ declare_lint! {
     "detect private items in public interfaces not caught by the old implementation"
 }
 
+declare_lint! {
+    pub INACCESSIBLE_EXTERN_CRATE,
+    Deny,
+    "use of inaccessible extern crate erroneously allowed"
+}
+
+declare_lint! {
+    pub INVALID_TYPE_PARAM_DEFAULT,
+    Deny,
+    "type parameter default erroneously allowed in invalid location"
+}
+
+declare_lint! {
+    pub ILLEGAL_FLOATING_POINT_CONSTANT_PATTERN,
+    Deny,
+    "floating-point constants cannot be used in patterns"
+}
+
+declare_lint! {
+    pub ILLEGAL_STRUCT_OR_ENUM_CONSTANT_PATTERN,
+    Deny,
+    "constants of struct or enum type can only be used in a pattern if \
+     the struct or enum has `#[derive(PartialEq, Eq)]`"
+}
+
+declare_lint! {
+    pub RAW_POINTER_DERIVE,
+    Warn,
+    "uses of #[derive] with raw pointers are rarely correct"
+}
+
+declare_lint! {
+    pub HR_LIFETIME_IN_ASSOC_TYPE,
+    Deny,
+    "binding for associated type references higher-ranked lifetime \
+     that does not appear in the trait input types"
+}
+
+declare_lint! {
+    pub OVERLAPPING_INHERENT_IMPLS,
+    Deny,
+    "two overlapping inherent impls define an item with the same name were erroneously allowed"
+}
+
+declare_lint! {
+    pub RENAMED_AND_REMOVED_LINTS,
+    Warn,
+    "lints that have been renamed or removed"
+}
+
+declare_lint! {
+    pub SUPER_OR_SELF_IN_GLOBAL_PATH,
+    Deny,
+    "detects super or self keywords at the beginning of global path"
+}
+
+declare_lint! {
+    pub LIFETIME_UNDERSCORE,
+    Deny,
+    "lifetimes or labels named `'_` were erroneously allowed"
+}
+
+declare_lint! {
+    pub RESOLVE_TRAIT_ON_DEFAULTED_UNIT,
+    Warn,
+    "attempt to resolve a trait on an expression whose type cannot be inferred but which \
+     currently defaults to ()"
+}
+
+declare_lint! {
+    pub SAFE_EXTERN_STATICS,
+    Warn,
+    "safe access to extern statics was erroneously allowed"
+}
+
+declare_lint! {
+    pub PATTERNS_IN_FNS_WITHOUT_BODY,
+    Warn,
+    "patterns in functions without body were erroneously allowed"
+}
+
+declare_lint! {
+    pub EXTRA_REQUIREMENT_IN_IMPL,
+    Deny,
+    "detects extra requirements in impls that were erroneously allowed"
+}
+
+declare_lint! {
+    pub LEGACY_DIRECTORY_OWNERSHIP,
+    Warn,
+    "non-inline, non-`#[path]` modules (e.g. `mod foo;`) were erroneously allowed in some files \
+     not named `mod.rs`"
+}
+
+declare_lint! {
+    pub LEGACY_IMPORTS,
+    Warn,
+    "detects names that resolve to ambiguous glob imports with RFC 1560"
+}
+
+declare_lint! {
+    pub LEGACY_CONSTRUCTOR_VISIBILITY,
+    Deny,
+    "detects use of struct constructors that would be invisible with new visibility rules"
+}
+
+declare_lint! {
+    pub MISSING_FRAGMENT_SPECIFIER,
+    Warn,
+    "detects missing fragment specifiers in unused `macro_rules!` patterns"
+}
+
+declare_lint! {
+    pub DEPRECATED,
+    Warn,
+    "detects use of deprecated items"
+}
+
 /// Does nothing as a lint pass, but registers some `Lint`s
 /// which are used by other parts of the compiler.
 #[derive(Copy, Clone)]
@@ -140,18 +258,37 @@ impl LintPass for HardwiredLints {
             UNUSED_ASSIGNMENTS,
             DEAD_CODE,
             UNREACHABLE_CODE,
+            UNREACHABLE_PATTERNS,
             WARNINGS,
             UNUSED_FEATURES,
             STABLE_FEATURES,
             UNKNOWN_CRATE_TYPES,
-            VARIANT_SIZE_DIFFERENCES,
             FAT_PTR_TRANSMUTES,
             TRIVIAL_CASTS,
             TRIVIAL_NUMERIC_CASTS,
             PRIVATE_IN_PUBLIC,
-            CONST_ERR
+            INACCESSIBLE_EXTERN_CRATE,
+            INVALID_TYPE_PARAM_DEFAULT,
+            ILLEGAL_FLOATING_POINT_CONSTANT_PATTERN,
+            ILLEGAL_STRUCT_OR_ENUM_CONSTANT_PATTERN,
+            CONST_ERR,
+            RAW_POINTER_DERIVE,
+            OVERLAPPING_INHERENT_IMPLS,
+            RENAMED_AND_REMOVED_LINTS,
+            SUPER_OR_SELF_IN_GLOBAL_PATH,
+            HR_LIFETIME_IN_ASSOC_TYPE,
+            LIFETIME_UNDERSCORE,
+            RESOLVE_TRAIT_ON_DEFAULTED_UNIT,
+            SAFE_EXTERN_STATICS,
+            PATTERNS_IN_FNS_WITHOUT_BODY,
+            EXTRA_REQUIREMENT_IN_IMPL,
+            LEGACY_DIRECTORY_OWNERSHIP,
+            LEGACY_IMPORTS,
+            LEGACY_CONSTRUCTOR_VISIBILITY,
+            MISSING_FRAGMENT_SPECIFIER,
+            DEPRECATED
         )
     }
 }
 
-impl LateLintPass for HardwiredLints {}
+impl<'a, 'tcx> LateLintPass<'a, 'tcx> for HardwiredLints {}

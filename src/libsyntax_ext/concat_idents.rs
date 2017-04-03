@@ -8,19 +8,21 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use syntax::ast::{self, TokenTree};
-use syntax::codemap::Span;
+use syntax::ast;
 use syntax::ext::base::*;
 use syntax::ext::base;
 use syntax::feature_gate;
 use syntax::parse::token;
-use syntax::parse::token::str_to_ident;
 use syntax::ptr::P;
+use syntax_pos::Span;
+use syntax::tokenstream::TokenTree;
 
-pub fn expand_syntax_ext<'cx>(cx: &mut ExtCtxt, sp: Span, tts: &[TokenTree])
-                              -> Box<base::MacResult+'cx> {
+pub fn expand_syntax_ext<'cx>(cx: &'cx mut ExtCtxt,
+                              sp: Span,
+                              tts: &[TokenTree])
+                              -> Box<base::MacResult + 'cx> {
     if !cx.ecfg.enable_concat_idents() {
-        feature_gate::emit_feature_err(&cx.parse_sess.span_diagnostic,
+        feature_gate::emit_feature_err(&cx.parse_sess,
                                        "concat_idents",
                                        sp,
                                        feature_gate::GateIssue::Language,
@@ -32,42 +34,59 @@ pub fn expand_syntax_ext<'cx>(cx: &mut ExtCtxt, sp: Span, tts: &[TokenTree])
     for (i, e) in tts.iter().enumerate() {
         if i & 1 == 1 {
             match *e {
-                TokenTree::Token(_, token::Comma) => {},
+                TokenTree::Token(_, token::Comma) => {}
                 _ => {
                     cx.span_err(sp, "concat_idents! expecting comma.");
                     return DummyResult::expr(sp);
-                },
+                }
             }
         } else {
             match *e {
-                TokenTree::Token(_, token::Ident(ident, _)) => {
-                    res_str.push_str(&ident.name.as_str())
-                },
+                TokenTree::Token(_, token::Ident(ident)) => res_str.push_str(&ident.name.as_str()),
                 _ => {
                     cx.span_err(sp, "concat_idents! requires ident args.");
                     return DummyResult::expr(sp);
-                },
+                }
             }
         }
     }
-    let res = str_to_ident(&res_str);
+    let res = ast::Ident::from_str(&res_str);
 
-    let e = P(ast::Expr {
-        id: ast::DUMMY_NODE_ID,
-        node: ast::ExprPath(None,
+    struct Result {
+        ident: ast::Ident,
+        span: Span,
+    };
+
+    impl Result {
+        fn path(&self) -> ast::Path {
             ast::Path {
-                 span: sp,
-                 global: false,
-                 segments: vec!(
-                    ast::PathSegment {
-                        identifier: res,
-                        parameters: ast::PathParameters::none(),
-                    }
-                )
+                span: self.span,
+                segments: vec![ast::PathSegment::from_ident(self.ident, self.span)],
             }
-        ),
+        }
+    }
+
+    impl base::MacResult for Result {
+        fn make_expr(self: Box<Self>) -> Option<P<ast::Expr>> {
+            Some(P(ast::Expr {
+                id: ast::DUMMY_NODE_ID,
+                node: ast::ExprKind::Path(None, self.path()),
+                span: self.span,
+                attrs: ast::ThinVec::new(),
+            }))
+        }
+
+        fn make_ty(self: Box<Self>) -> Option<P<ast::Ty>> {
+            Some(P(ast::Ty {
+                id: ast::DUMMY_NODE_ID,
+                node: ast::TyKind::Path(None, self.path()),
+                span: self.span,
+            }))
+        }
+    }
+
+    Box::new(Result {
+        ident: res,
         span: sp,
-        attrs: None,
-    });
-    MacEager::expr(e)
+    })
 }

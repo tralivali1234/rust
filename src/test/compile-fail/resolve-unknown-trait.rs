@@ -10,10 +10,10 @@
 
 
 trait NewTrait : SomeNonExistentTrait {}
-//~^ ERROR use of undeclared trait name `SomeNonExistentTrait`
+//~^ ERROR cannot find trait `SomeNonExistentTrait` in this scope
 
 impl SomeNonExistentTrait for isize {}
-//~^ ERROR use of undeclared trait name `SomeNonExistentTrait`
+//~^ ERROR cannot find trait `SomeNonExistentTrait` in this scope
 
 fn f<T:SomeNonExistentTrait>() {}
-//~^ ERROR use of undeclared trait name `SomeNonExistentTrait`
+//~^ ERROR cannot find trait `SomeNonExistentTrait` in this scope

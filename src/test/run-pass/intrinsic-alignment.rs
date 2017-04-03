@@ -23,7 +23,9 @@ mod rusti {
           target_os = "freebsd",
           target_os = "dragonfly",
           target_os = "netbsd",
-          target_os = "openbsd"))]
+          target_os = "openbsd",
+          target_os = "solaris",
+          target_os = "emscripten"))]
 mod m {
     #[main]
     #[cfg(target_arch = "x86")]
@@ -35,7 +37,7 @@ mod m {
     }
 
     #[main]
-    #[cfg(any(target_arch = "x86_64", target_arch = "arm", target_arch = "aarch64"))]
+    #[cfg(not(target_arch = "x86"))]
     pub fn main() {
         unsafe {
             assert_eq!(::rusti::pref_align_of::<u64>(), 8);

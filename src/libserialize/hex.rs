@@ -82,7 +82,7 @@ impl fmt::Display for FromHexError {
 impl error::Error for FromHexError {
     fn description(&self) -> &str {
         match *self {
-            InvalidHexCharacter(_, _) => "invalid character",
+            InvalidHexCharacter(..) => "invalid character",
             InvalidHexLength => "invalid length",
         }
     }
@@ -132,7 +132,10 @@ impl FromHex for str {
                     buf >>= 4;
                     continue
                 }
-                _ => return Err(InvalidHexCharacter(self.char_at(idx), idx)),
+                _ => {
+                    let ch = self[idx..].chars().next().unwrap();
+                    return Err(InvalidHexCharacter(ch, idx))
+                }
             }
 
             modulus += 1;

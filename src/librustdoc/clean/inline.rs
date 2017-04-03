@@ -10,51 +10,43 @@
 
 //! Support for inlining external documentation into the current AST.
 
-use std::collections::HashSet;
+use std::collections::BTreeMap;
+use std::io;
+use std::iter::once;
 
 use syntax::ast;
-use syntax::attr::AttrMetaMethods;
-use rustc_front::hir;
+use syntax_pos::DUMMY_SP;
+use rustc::hir;
 
-use rustc::middle::cstore::{self, CrateStore};
-use rustc::middle::def;
-use rustc::middle::def_id::DefId;
-use rustc::middle::ty;
-use rustc::middle::subst;
-use rustc::middle::stability;
-use rustc::middle::const_eval;
+use rustc::hir::def::{Def, CtorKind};
+use rustc::hir::def_id::DefId;
+use rustc::ty;
+use rustc::util::nodemap::FxHashSet;
 
-use core::DocContext;
+use core::{DocContext, DocAccessLevels};
 use doctree;
-use clean;
+use clean::{self, GetDefId};
 
-use super::{Clean, ToSource};
+use super::Clean;
 
-/// Attempt to inline the definition of a local node id into this AST.
+/// Attempt to inline a definition into this AST.
 ///
-/// This function will fetch the definition of the id specified, and if it is
-/// from another crate it will attempt to inline the documentation from the
-/// other crate into this crate.
+/// This function will fetch the definition specified, and if it is
+/// from another crate it will attempt to inline the documentation
+/// from the other crate into this crate.
 ///
 /// This is primarily used for `pub use` statements which are, in general,
 /// implementation details. Inlining the documentation should help provide a
 /// better experience when reading the documentation in this use case.
 ///
-/// The returned value is `None` if the `id` could not be inlined, and `Some`
-/// of a vector of items if it was successfully expanded.
-pub fn try_inline(cx: &DocContext, id: ast::NodeId, into: Option<ast::Name>)
+/// The returned value is `None` if the definition could not be inlined,
+/// and `Some` of a vector of items if it was successfully expanded.
+pub fn try_inline(cx: &DocContext, def: Def, into: Option<ast::Name>)
                   -> Option<Vec<clean::Item>> {
-    let tcx = match cx.tcx_opt() {
-        Some(tcx) => tcx,
-        None => return None,
-    };
-    let def = match tcx.def_map.borrow().get(&id) {
-        Some(d) => d.full_def(),
-        None => return None,
-    };
+    if def == Def::Err { return None }
     let did = def.def_id();
     if did.is_local() { return None }
-    try_inline_def(cx, tcx, def).map(|vec| {
+    try_inline_def(cx, def).map(|vec| {
         vec.into_iter().map(|mut item| {
             match into {
                 Some(into) if item.name.is_some() => {
@@ -67,69 +59,76 @@ pub fn try_inline(cx: &DocContext, id: ast::NodeId, into: Option<ast::Name>)
     })
 }
 
-fn try_inline_def(cx: &DocContext, tcx: &ty::ctxt,
-                  def: def::Def) -> Option<Vec<clean::Item>> {
+fn try_inline_def(cx: &DocContext, def: Def) -> Option<Vec<clean::Item>> {
+    let tcx = cx.tcx;
     let mut ret = Vec::new();
-    let did = def.def_id();
     let inner = match def {
-        def::DefTrait(did) => {
-            record_extern_fqn(cx, did, clean::TypeTrait);
-            clean::TraitItem(build_external_trait(cx, tcx, did))
+        Def::Trait(did) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Trait);
+            ret.extend(build_impls(cx, did));
+            clean::TraitItem(build_external_trait(cx, did))
         }
-        def::DefFn(did, false) => {
-            // If this function is a tuple struct constructor, we just skip it
-            record_extern_fqn(cx, did, clean::TypeFunction);
-            clean::FunctionItem(build_external_function(cx, tcx, did))
+        Def::Fn(did) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Function);
+            clean::FunctionItem(build_external_function(cx, did))
         }
-        def::DefStruct(did) => {
-            record_extern_fqn(cx, did, clean::TypeStruct);
-            ret.extend(build_impls(cx, tcx, did));
-            clean::StructItem(build_struct(cx, tcx, did))
+        Def::Struct(did) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Struct);
+            ret.extend(build_impls(cx, did));
+            clean::StructItem(build_struct(cx, did))
         }
-        def::DefTy(did, false) => {
-            record_extern_fqn(cx, did, clean::TypeTypedef);
-            ret.extend(build_impls(cx, tcx, did));
-            build_type(cx, tcx, did)
+        Def::Union(did) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Union);
+            ret.extend(build_impls(cx, did));
+            clean::UnionItem(build_union(cx, did))
         }
-        def::DefTy(did, true) => {
-            record_extern_fqn(cx, did, clean::TypeEnum);
-            ret.extend(build_impls(cx, tcx, did));
-            build_type(cx, tcx, did)
+        Def::TyAlias(did) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Typedef);
+            ret.extend(build_impls(cx, did));
+            clean::TypedefItem(build_type_alias(cx, did), false)
+        }
+        Def::Enum(did) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Enum);
+            ret.extend(build_impls(cx, did));
+            clean::EnumItem(build_enum(cx, did))
         }
         // Assume that the enum type is reexported next to the variant, and
         // variants don't show up in documentation specially.
-        def::DefVariant(..) => return Some(Vec::new()),
-        def::DefMod(did) => {
-            record_extern_fqn(cx, did, clean::TypeModule);
-            clean::ModuleItem(build_module(cx, tcx, did))
+        // Similarly, consider that struct type is reexported next to its constructor.
+        Def::Variant(..) |
+        Def::VariantCtor(..) |
+        Def::StructCtor(..) => return Some(Vec::new()),
+        Def::Mod(did) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Module);
+            clean::ModuleItem(build_module(cx, did))
         }
-        def::DefStatic(did, mtbl) => {
-            record_extern_fqn(cx, did, clean::TypeStatic);
-            clean::StaticItem(build_static(cx, tcx, did, mtbl))
+        Def::Static(did, mtbl) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Static);
+            clean::StaticItem(build_static(cx, did, mtbl))
         }
-        def::DefConst(did) | def::DefAssociatedConst(did) => {
-            record_extern_fqn(cx, did, clean::TypeConst);
-            clean::ConstantItem(build_const(cx, tcx, did))
+        Def::Const(did) => {
+            record_extern_fqn(cx, did, clean::TypeKind::Const);
+            clean::ConstantItem(build_const(cx, did))
         }
         _ => return None,
     };
-    cx.inlined.borrow_mut().as_mut().unwrap().insert(did);
+    let did = def.def_id();
+    cx.renderinfo.borrow_mut().inlined.insert(did);
     ret.push(clean::Item {
-        source: clean::Span::empty(),
+        source: tcx.def_span(did).clean(cx),
         name: Some(tcx.item_name(did).to_string()),
-        attrs: load_attrs(cx, tcx, did),
+        attrs: load_attrs(cx, did),
         inner: inner,
-        visibility: Some(hir::Public),
-        stability: stability::lookup_stability(tcx, did).clean(cx),
-        deprecation: stability::lookup_deprecation(tcx, did).clean(cx),
+        visibility: Some(clean::Public),
+        stability: tcx.lookup_stability(did).clean(cx),
+        deprecation: tcx.lookup_deprecation(did).clean(cx),
         def_id: did,
     });
     Some(ret)
 }
 
-pub fn load_attrs(cx: &DocContext, tcx: &ty::ctxt,
-                  did: DefId) -> Vec<clean::Attribute> {
-    tcx.get_attrs(did).iter().map(|a| a.clean(cx)).collect()
+pub fn load_attrs(cx: &DocContext, did: DefId) -> clean::Attributes {
+    cx.tcx.get_attrs(did).clean(cx)
 }
 
 /// Record an external fully qualified name in the external_paths cache.
@@ -137,154 +136,171 @@ pub fn load_attrs(cx: &DocContext, tcx: &ty::ctxt,
 /// These names are used later on by HTML rendering to generate things like
 /// source links back to the original item.
 pub fn record_extern_fqn(cx: &DocContext, did: DefId, kind: clean::TypeKind) {
-    match cx.tcx_opt() {
-        Some(tcx) => {
-            let fqn = tcx.sess.cstore.extern_item_path(did);
-            let fqn = fqn.into_iter().map(|i| i.to_string()).collect();
-            cx.external_paths.borrow_mut().as_mut().unwrap().insert(did, (fqn, kind));
+    let crate_name = cx.tcx.sess.cstore.crate_name(did.krate).to_string();
+    let relative = cx.tcx.def_path(did).data.into_iter().filter_map(|elem| {
+        // extern blocks have an empty name
+        let s = elem.data.to_string();
+        if !s.is_empty() {
+            Some(s)
+        } else {
+            None
         }
-        None => {}
-    }
+    });
+    let fqn = once(crate_name).chain(relative).collect();
+    cx.renderinfo.borrow_mut().external_paths.insert(did, (fqn, kind));
 }
 
-pub fn build_external_trait(cx: &DocContext, tcx: &ty::ctxt,
-                            did: DefId) -> clean::Trait {
-    let def = tcx.lookup_trait_def(did);
-    let trait_items = tcx.trait_items(did).clean(cx);
-    let predicates = tcx.lookup_predicates(did);
-    let generics = (&def.generics, &predicates, subst::TypeSpace).clean(cx);
+pub fn build_external_trait(cx: &DocContext, did: DefId) -> clean::Trait {
+    let trait_items = cx.tcx.associated_items(did).map(|item| item.clean(cx)).collect();
+    let predicates = cx.tcx.item_predicates(did);
+    let generics = (cx.tcx.item_generics(did), &predicates).clean(cx);
     let generics = filter_non_trait_generics(did, generics);
     let (generics, supertrait_bounds) = separate_supertrait_bounds(generics);
     clean::Trait {
-        unsafety: def.unsafety,
+        unsafety: cx.tcx.lookup_trait_def(did).unsafety,
         generics: generics,
         items: trait_items,
         bounds: supertrait_bounds,
     }
 }
 
-fn build_external_function(cx: &DocContext, tcx: &ty::ctxt, did: DefId) -> clean::Function {
-    let t = tcx.lookup_item_type(did);
-    let (decl, style, abi) = match t.ty.sty {
-        ty::TyBareFn(_, ref f) => ((did, &f.sig).clean(cx), f.unsafety, f.abi),
-        _ => panic!("bad function"),
-    };
+fn build_external_function(cx: &DocContext, did: DefId) -> clean::Function {
+    let sig = cx.tcx.item_type(did).fn_sig();
 
-    let constness = if tcx.sess.cstore.is_const_fn(did) {
+    let constness = if cx.tcx.sess.cstore.is_const_fn(did) {
         hir::Constness::Const
     } else {
         hir::Constness::NotConst
     };
 
-    let predicates = tcx.lookup_predicates(did);
+    let predicates = cx.tcx.item_predicates(did);
     clean::Function {
-        decl: decl,
-        generics: (&t.generics, &predicates, subst::FnSpace).clean(cx),
-        unsafety: style,
+        decl: (did, sig).clean(cx),
+        generics: (cx.tcx.item_generics(did), &predicates).clean(cx),
+        unsafety: sig.unsafety(),
         constness: constness,
-        abi: abi,
+        abi: sig.abi(),
     }
 }
 
-fn build_struct(cx: &DocContext, tcx: &ty::ctxt, did: DefId) -> clean::Struct {
-    use syntax::parse::token::special_idents::unnamed_field;
+fn build_enum(cx: &DocContext, did: DefId) -> clean::Enum {
+    let predicates = cx.tcx.item_predicates(did);
 
-    let t = tcx.lookup_item_type(did);
-    let predicates = tcx.lookup_predicates(did);
-    let variant = tcx.lookup_adt_def(did).struct_variant();
+    clean::Enum {
+        generics: (cx.tcx.item_generics(did), &predicates).clean(cx),
+        variants_stripped: false,
+        variants: cx.tcx.lookup_adt_def(did).variants.clean(cx),
+    }
+}
+
+fn build_struct(cx: &DocContext, did: DefId) -> clean::Struct {
+    let predicates = cx.tcx.item_predicates(did);
+    let variant = cx.tcx.lookup_adt_def(did).struct_variant();
 
     clean::Struct {
-        struct_type: match &*variant.fields {
-            [] => doctree::Unit,
-            [ref f] if f.name == unnamed_field.name => doctree::Newtype,
-            [ref f, ..] if f.name == unnamed_field.name => doctree::Tuple,
-            _ => doctree::Plain,
+        struct_type: match variant.ctor_kind {
+            CtorKind::Fictive => doctree::Plain,
+            CtorKind::Fn => doctree::Tuple,
+            CtorKind::Const => doctree::Unit,
         },
-        generics: (&t.generics, &predicates, subst::TypeSpace).clean(cx),
+        generics: (cx.tcx.item_generics(did), &predicates).clean(cx),
         fields: variant.fields.clean(cx),
         fields_stripped: false,
     }
 }
 
-fn build_type(cx: &DocContext, tcx: &ty::ctxt, did: DefId) -> clean::ItemEnum {
-    let t = tcx.lookup_item_type(did);
-    let predicates = tcx.lookup_predicates(did);
-    match t.ty.sty {
-        ty::TyEnum(edef, _) if !tcx.sess.cstore.is_typedef(did) => {
-            return clean::EnumItem(clean::Enum {
-                generics: (&t.generics, &predicates, subst::TypeSpace).clean(cx),
-                variants_stripped: false,
-                variants: edef.variants.clean(cx),
-            })
-        }
-        _ => {}
-    }
+fn build_union(cx: &DocContext, did: DefId) -> clean::Union {
+    let predicates = cx.tcx.item_predicates(did);
+    let variant = cx.tcx.lookup_adt_def(did).struct_variant();
 
-    clean::TypedefItem(clean::Typedef {
-        type_: t.ty.clean(cx),
-        generics: (&t.generics, &predicates, subst::TypeSpace).clean(cx),
-    }, false)
+    clean::Union {
+        struct_type: doctree::Plain,
+        generics: (cx.tcx.item_generics(did), &predicates).clean(cx),
+        fields: variant.fields.clean(cx),
+        fields_stripped: false,
+    }
 }
 
-pub fn build_impls(cx: &DocContext, tcx: &ty::ctxt,
-                   did: DefId) -> Vec<clean::Item> {
-    tcx.populate_inherent_implementations_for_type_if_necessary(did);
+fn build_type_alias(cx: &DocContext, did: DefId) -> clean::Typedef {
+    let predicates = cx.tcx.item_predicates(did);
+
+    clean::Typedef {
+        type_: cx.tcx.item_type(did).clean(cx),
+        generics: (cx.tcx.item_generics(did), &predicates).clean(cx),
+    }
+}
+
+pub fn build_impls(cx: &DocContext, did: DefId) -> Vec<clean::Item> {
+    let tcx = cx.tcx;
     let mut impls = Vec::new();
 
-    match tcx.inherent_impls.borrow().get(&did) {
-        None => {}
-        Some(i) => {
-            for &did in i.iter() {
-                build_impl(cx, tcx, did, &mut impls);
-            }
-        }
+    for &did in ty::queries::inherent_impls::get(tcx, DUMMY_SP, did).iter() {
+        build_impl(cx, did, &mut impls);
     }
 
-    // If this is the first time we've inlined something from this crate, then
-    // we inline *all* impls from the crate into this crate. Note that there's
+    // If this is the first time we've inlined something from another crate, then
+    // we inline *all* impls from all the crates into this crate. Note that there's
     // currently no way for us to filter this based on type, and we likely need
     // many impls for a variety of reasons.
     //
     // Primarily, the impls will be used to populate the documentation for this
     // type being inlined, but impls can also be used when generating
     // documentation for primitives (no way to find those specifically).
-    if cx.populated_crate_impls.borrow_mut().insert(did.krate) {
-        for item in tcx.sess.cstore.crate_top_level_items(did.krate) {
-            populate_impls(cx, tcx, item.def, &mut impls);
-        }
+    if cx.populated_all_crate_impls.get() {
+        return impls;
+    }
 
-        fn populate_impls(cx: &DocContext, tcx: &ty::ctxt,
-                          def: cstore::DefLike,
-                          impls: &mut Vec<clean::Item>) {
-            match def {
-                cstore::DlImpl(did) => build_impl(cx, tcx, did, impls),
-                cstore::DlDef(def::DefMod(did)) => {
-                    for item in tcx.sess.cstore.item_children(did) {
-                        populate_impls(cx, tcx, item.def, impls)
-                    }
-                }
-                _ => {}
-            }
+    cx.populated_all_crate_impls.set(true);
+
+    for did in tcx.sess.cstore.implementations_of_trait(None) {
+        build_impl(cx, did, &mut impls);
+    }
+
+    // Also try to inline primitive impls from other crates.
+    let primitive_impls = [
+        tcx.lang_items.isize_impl(),
+        tcx.lang_items.i8_impl(),
+        tcx.lang_items.i16_impl(),
+        tcx.lang_items.i32_impl(),
+        tcx.lang_items.i64_impl(),
+        tcx.lang_items.i128_impl(),
+        tcx.lang_items.usize_impl(),
+        tcx.lang_items.u8_impl(),
+        tcx.lang_items.u16_impl(),
+        tcx.lang_items.u32_impl(),
+        tcx.lang_items.u64_impl(),
+        tcx.lang_items.u128_impl(),
+        tcx.lang_items.f32_impl(),
+        tcx.lang_items.f64_impl(),
+        tcx.lang_items.char_impl(),
+        tcx.lang_items.str_impl(),
+        tcx.lang_items.slice_impl(),
+        tcx.lang_items.const_ptr_impl(),
+        tcx.lang_items.mut_ptr_impl(),
+    ];
+
+    for def_id in primitive_impls.iter().filter_map(|&def_id| def_id) {
+        if !def_id.is_local() {
+            build_impl(cx, def_id, &mut impls);
         }
     }
 
-    return impls;
+    impls
 }
 
-pub fn build_impl(cx: &DocContext,
-                  tcx: &ty::ctxt,
-                  did: DefId,
-                  ret: &mut Vec<clean::Item>) {
-    if !cx.inlined.borrow_mut().as_mut().unwrap().insert(did) {
+pub fn build_impl(cx: &DocContext, did: DefId, ret: &mut Vec<clean::Item>) {
+    if !cx.renderinfo.borrow_mut().inlined.insert(did) {
         return
     }
 
-    let attrs = load_attrs(cx, tcx, did);
+    let attrs = load_attrs(cx, did);
+    let tcx = cx.tcx;
     let associated_trait = tcx.impl_trait_ref(did);
-    if let Some(ref t) = associated_trait {
-        // If this is an impl for a #[doc(hidden)] trait, be sure to not inline
-        let trait_attrs = load_attrs(cx, tcx, t.def_id);
-        if trait_attrs.iter().any(|a| is_doc_hidden(a)) {
+
+    // Only inline impl if the implemented trait is
+    // reachable in rustdoc generated documentation
+    if let Some(traitref) = associated_trait {
+        if !cx.access_levels.borrow().is_doc_reachable(traitref.def_id) {
             return
         }
     }
@@ -300,56 +316,59 @@ pub fn build_impl(cx: &DocContext,
                     clean::RegionBound(..) => unreachable!(),
                 },
             }),
-            source: clean::Span::empty(),
+            source: tcx.def_span(did).clean(cx),
             name: None,
             attrs: attrs,
-            visibility: Some(hir::Inherited),
-            stability: stability::lookup_stability(tcx, did).clean(cx),
-            deprecation: stability::lookup_deprecation(tcx, did).clean(cx),
+            visibility: Some(clean::Inherited),
+            stability: tcx.lookup_stability(did).clean(cx),
+            deprecation: tcx.lookup_deprecation(did).clean(cx),
             def_id: did,
         });
     }
 
-    let predicates = tcx.lookup_predicates(did);
-    let trait_items = tcx.sess.cstore.impl_items(did)
-            .iter()
-            .filter_map(|did| {
-        let did = did.def_id();
-        let impl_item = tcx.impl_or_trait_item(did);
-        match impl_item {
-            ty::ConstTraitItem(ref assoc_const) => {
-                let did = assoc_const.def_id;
-                let type_scheme = tcx.lookup_item_type(did);
-                let default = if assoc_const.has_value {
-                    Some(const_eval::lookup_const_by_id(tcx, did, None)
-                         .unwrap().span.to_src(cx))
+    let for_ = tcx.item_type(did).clean(cx);
+
+    // Only inline impl if the implementing type is
+    // reachable in rustdoc generated documentation
+    if let Some(did) = for_.def_id() {
+        if !cx.access_levels.borrow().is_doc_reachable(did) {
+            return
+        }
+    }
+
+    let predicates = tcx.item_predicates(did);
+    let trait_items = tcx.associated_items(did).filter_map(|item| {
+        match item.kind {
+            ty::AssociatedKind::Const => {
+                let default = if item.defaultness.has_value() {
+                    Some(print_inlined_const(cx, item.def_id))
                 } else {
                     None
                 };
                 Some(clean::Item {
-                    name: Some(assoc_const.name.clean(cx)),
+                    name: Some(item.name.clean(cx)),
                     inner: clean::AssociatedConstItem(
-                        type_scheme.ty.clean(cx),
+                        tcx.item_type(item.def_id).clean(cx),
                         default,
                     ),
-                    source: clean::Span::empty(),
-                    attrs: vec![],
+                    source: tcx.def_span(item.def_id).clean(cx),
+                    attrs: clean::Attributes::default(),
                     visibility: None,
-                    stability: stability::lookup_stability(tcx, did).clean(cx),
-                    deprecation: stability::lookup_deprecation(tcx, did).clean(cx),
-                    def_id: did
+                    stability: tcx.lookup_stability(item.def_id).clean(cx),
+                    deprecation: tcx.lookup_deprecation(item.def_id).clean(cx),
+                    def_id: item.def_id
                 })
             }
-            ty::MethodTraitItem(method) => {
-                if method.vis != hir::Public && associated_trait.is_none() {
+            ty::AssociatedKind::Method => {
+                if item.vis != ty::Visibility::Public && associated_trait.is_none() {
                     return None
                 }
-                let mut item = method.clean(cx);
-                item.inner = match item.inner.clone() {
+                let mut cleaned = item.clean(cx);
+                cleaned.inner = match cleaned.inner.clone() {
                     clean::TyMethodItem(clean::TyMethod {
-                        unsafety, decl, self_, generics, abi
+                        unsafety, decl, generics, abi
                     }) => {
-                        let constness = if tcx.sess.cstore.is_const_fn(did) {
+                        let constness = if tcx.sess.cstore.is_const_fn(item.def_id) {
                             hir::Constness::Const
                         } else {
                             hir::Constness::NotConst
@@ -359,144 +378,132 @@ pub fn build_impl(cx: &DocContext,
                             unsafety: unsafety,
                             constness: constness,
                             decl: decl,
-                            self_: self_,
                             generics: generics,
                             abi: abi
                         })
                     }
-                    _ => panic!("not a tymethod"),
+                    ref r => panic!("not a tymethod: {:?}", r),
                 };
-                Some(item)
+                Some(cleaned)
             }
-            ty::TypeTraitItem(ref assoc_ty) => {
-                let did = assoc_ty.def_id;
-                let type_scheme = ty::TypeScheme {
-                    ty: assoc_ty.ty.unwrap(),
-                    generics: ty::Generics::empty()
+            ty::AssociatedKind::Type => {
+                let typedef = clean::Typedef {
+                    type_: tcx.item_type(item.def_id).clean(cx),
+                    generics: clean::Generics {
+                        lifetimes: vec![],
+                        type_params: vec![],
+                        where_predicates: vec![]
+                    }
                 };
-                // Not sure the choice of ParamSpace actually matters here,
-                // because an associated type won't have generics on the LHS
-                let typedef = (type_scheme, ty::GenericPredicates::empty(),
-                               subst::ParamSpace::TypeSpace).clean(cx);
                 Some(clean::Item {
-                    name: Some(assoc_ty.name.clean(cx)),
+                    name: Some(item.name.clean(cx)),
                     inner: clean::TypedefItem(typedef, true),
-                    source: clean::Span::empty(),
-                    attrs: vec![],
+                    source: tcx.def_span(item.def_id).clean(cx),
+                    attrs: clean::Attributes::default(),
                     visibility: None,
-                    stability: stability::lookup_stability(tcx, did).clean(cx),
-                    deprecation: stability::lookup_deprecation(tcx, did).clean(cx),
-                    def_id: did
+                    stability: tcx.lookup_stability(item.def_id).clean(cx),
+                    deprecation: tcx.lookup_deprecation(item.def_id).clean(cx),
+                    def_id: item.def_id
                 })
             }
         }
     }).collect::<Vec<_>>();
     let polarity = tcx.trait_impl_polarity(did);
-    let ty = tcx.lookup_item_type(did);
     let trait_ = associated_trait.clean(cx).map(|bound| {
         match bound {
             clean::TraitBound(polyt, _) => polyt.trait_,
             clean::RegionBound(..) => unreachable!(),
         }
     });
-    if let Some(clean::ResolvedPath { did, .. }) = trait_ {
-        if Some(did) == cx.deref_trait_did.get() {
-            super::build_deref_target_impls(cx, &trait_items, ret);
-        }
+    if trait_.def_id() == tcx.lang_items.deref_trait() {
+        super::build_deref_target_impls(cx, &trait_items, ret);
     }
+
+    let provided = trait_.def_id().map(|did| {
+        tcx.provided_trait_methods(did)
+            .into_iter()
+            .map(|meth| meth.name.to_string())
+            .collect()
+    }).unwrap_or(FxHashSet());
+
     ret.push(clean::Item {
         inner: clean::ImplItem(clean::Impl {
             unsafety: hir::Unsafety::Normal, // FIXME: this should be decoded
-            derived: clean::detect_derived(&attrs),
+            provided_trait_methods: provided,
             trait_: trait_,
-            for_: ty.ty.clean(cx),
-            generics: (&ty.generics, &predicates, subst::TypeSpace).clean(cx),
+            for_: for_,
+            generics: (tcx.item_generics(did), &predicates).clean(cx),
             items: trait_items,
-            polarity: polarity.map(|p| { p.clean(cx) }),
+            polarity: Some(polarity.clean(cx)),
         }),
-        source: clean::Span::empty(),
+        source: tcx.def_span(did).clean(cx),
         name: None,
         attrs: attrs,
-        visibility: Some(hir::Inherited),
-        stability: stability::lookup_stability(tcx, did).clean(cx),
-        deprecation: stability::lookup_deprecation(tcx, did).clean(cx),
+        visibility: Some(clean::Inherited),
+        stability: tcx.lookup_stability(did).clean(cx),
+        deprecation: tcx.lookup_deprecation(did).clean(cx),
         def_id: did,
     });
-
-    fn is_doc_hidden(a: &clean::Attribute) -> bool {
-        match *a {
-            clean::List(ref name, ref inner) if *name == "doc" => {
-                inner.iter().any(|a| {
-                    match *a {
-                        clean::Word(ref s) => *s == "hidden",
-                        _ => false,
-                    }
-                })
-            }
-            _ => false
-        }
-    }
 }
 
-fn build_module(cx: &DocContext, tcx: &ty::ctxt,
-                did: DefId) -> clean::Module {
+fn build_module(cx: &DocContext, did: DefId) -> clean::Module {
     let mut items = Vec::new();
-    fill_in(cx, tcx, did, &mut items);
+    fill_in(cx, did, &mut items);
     return clean::Module {
         items: items,
         is_crate: false,
     };
 
-    fn fill_in(cx: &DocContext, tcx: &ty::ctxt, did: DefId,
-               items: &mut Vec<clean::Item>) {
+    fn fill_in(cx: &DocContext, did: DefId, items: &mut Vec<clean::Item>) {
         // If we're reexporting a reexport it may actually reexport something in
         // two namespaces, so the target may be listed twice. Make sure we only
         // visit each node at most once.
-        let mut visited = HashSet::new();
-        for item in tcx.sess.cstore.item_children(did) {
-            match item.def {
-                cstore::DlDef(def::DefForeignMod(did)) => {
-                    fill_in(cx, tcx, did, items);
+        let mut visited = FxHashSet();
+        for item in cx.tcx.sess.cstore.item_children(did) {
+            let def_id = item.def.def_id();
+            if cx.tcx.sess.cstore.visibility(def_id) == ty::Visibility::Public {
+                if !visited.insert(def_id) { continue }
+                if let Some(i) = try_inline_def(cx, item.def) {
+                    items.extend(i)
                 }
-                cstore::DlDef(def) if item.vis == hir::Public => {
-                    if !visited.insert(def) { return }
-                    match try_inline_def(cx, tcx, def) {
-                        Some(i) => items.extend(i),
-                        None => {}
-                    }
-                }
-                cstore::DlDef(..) => {}
-                // All impls were inlined above
-                cstore::DlImpl(..) => {}
-                cstore::DlField => panic!("unimplemented field"),
             }
         }
     }
 }
 
-fn build_const(cx: &DocContext, tcx: &ty::ctxt,
-               did: DefId) -> clean::Constant {
-    use rustc::middle::const_eval;
-    use rustc_front::print::pprust;
+struct InlinedConst {
+    nested_bodies: BTreeMap<hir::BodyId, hir::Body>
+}
 
-    let expr = const_eval::lookup_const_by_id(tcx, did, None).unwrap_or_else(|| {
-        panic!("expected lookup_const_by_id to succeed for {:?}", did);
-    });
-    debug!("converting constant expr {:?} to snippet", expr);
-    let sn = pprust::expr_to_string(expr);
-    debug!("got snippet {}", sn);
-
-    clean::Constant {
-        type_: tcx.lookup_item_type(did).ty.clean(cx),
-        expr: sn
+impl hir::print::PpAnn for InlinedConst {
+    fn nested(&self, state: &mut hir::print::State, nested: hir::print::Nested)
+              -> io::Result<()> {
+        if let hir::print::Nested::Body(body) = nested {
+            state.print_expr(&self.nested_bodies[&body].value)
+        } else {
+            Ok(())
+        }
     }
 }
 
-fn build_static(cx: &DocContext, tcx: &ty::ctxt,
-                did: DefId,
-                mutable: bool) -> clean::Static {
+fn print_inlined_const(cx: &DocContext, did: DefId) -> String {
+    let body = cx.tcx.sess.cstore.maybe_get_item_body(cx.tcx, did).unwrap();
+    let inlined = InlinedConst {
+        nested_bodies: cx.tcx.sess.cstore.item_body_nested_bodies(did)
+    };
+    hir::print::to_string(&inlined, |s| s.print_expr(&body.value))
+}
+
+fn build_const(cx: &DocContext, did: DefId) -> clean::Constant {
+    clean::Constant {
+        type_: cx.tcx.item_type(did).clean(cx),
+        expr: print_inlined_const(cx, did)
+    }
+}
+
+fn build_static(cx: &DocContext, did: DefId, mutable: bool) -> clean::Static {
     clean::Static {
-        type_: tcx.lookup_item_type(did).ty.clean(cx),
+        type_: cx.tcx.item_type(did).clean(cx),
         mutability: if mutable {clean::Mutable} else {clean::Immutable},
         expr: "\n\n\n".to_string(), // trigger the "[definition]" links
     }
@@ -506,11 +513,32 @@ fn build_static(cx: &DocContext, tcx: &ty::ctxt,
 /// its associated types as well. We specifically move these clauses to the
 /// associated types instead when displaying, so when we're genering the
 /// generics for the trait itself we need to be sure to remove them.
+/// We also need to remove the implied "recursive" Self: Trait bound.
 ///
 /// The inverse of this filtering logic can be found in the `Clean`
 /// implementation for `AssociatedType`
 fn filter_non_trait_generics(trait_did: DefId, mut g: clean::Generics)
                              -> clean::Generics {
+    for pred in &mut g.where_predicates {
+        match *pred {
+            clean::WherePredicate::BoundPredicate {
+                ty: clean::Generic(ref s),
+                ref mut bounds
+            } if *s == "Self" => {
+                bounds.retain(|bound| {
+                    match *bound {
+                        clean::TyParamBound::TraitBound(clean::PolyTrait {
+                            trait_: clean::ResolvedPath { did, .. },
+                            ..
+                        }, _) => did != trait_did,
+                        _ => true
+                    }
+                });
+            }
+            _ => {}
+        }
+    }
+
     g.where_predicates.retain(|pred| {
         match *pred {
             clean::WherePredicate::BoundPredicate {
@@ -518,12 +546,12 @@ fn filter_non_trait_generics(trait_did: DefId, mut g: clean::Generics)
                     self_type: box clean::Generic(ref s),
                     trait_: box clean::ResolvedPath { did, .. },
                     name: ref _name,
-                }, ..
-            } => *s != "Self" || did != trait_did,
+                }, ref bounds
+            } => !(*s == "Self" && did == trait_did) && !bounds.is_empty(),
             _ => true,
         }
     });
-    return g;
+    g
 }
 
 /// Supertrait bounds for a trait are also listed in the generics coming from

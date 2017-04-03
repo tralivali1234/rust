@@ -16,11 +16,13 @@
 #![unstable(feature = "enumset",
             reason = "matches collection reform specification, \
                       waiting for dust to settle",
-            issue = "0")]
+            issue = "37966")]
+#![rustc_deprecated(since = "1.16.0", reason = "long since replaced")]
+#![allow(deprecated)]
 
 use core::marker;
 use core::fmt;
-use core::iter::FromIterator;
+use core::iter::{FromIterator, FusedIterator};
 use core::ops::{Sub, BitOr, BitAnd, BitXor};
 
 // FIXME(contentions): implement union family of methods? (general design may be
@@ -48,7 +50,6 @@ impl<E> Clone for EnumSet<E> {
     }
 }
 
-#[stable(feature = "rust1", since = "1.0.0")]
 impl<E: CLike + fmt::Debug> fmt::Debug for EnumSet<E> {
     fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
         fmt.debug_set().entries(self).finish()
@@ -82,11 +83,12 @@ pub trait CLike {
 }
 
 fn bit<E: CLike>(e: &E) -> usize {
-    use core::usize;
+    use core::mem;
     let value = e.to_usize();
-    assert!(value < usize::BITS,
+    let bits = mem::size_of::<usize>() * 8;
+    assert!(value < bits,
             "EnumSet only supports up to {} variants.",
-            usize::BITS - 1);
+            bits - 1);
     1 << value
 }
 
@@ -104,7 +106,7 @@ impl<E: CLike> EnumSet<E> {
         self.bits.count_ones() as usize
     }
 
-    /// Returns true if the `EnumSet` is empty.
+    /// Returns `true` if the `EnumSet` is empty.
     pub fn is_empty(&self) -> bool {
         self.bits == 0
     }
@@ -220,6 +222,14 @@ pub struct Iter<E> {
     marker: marker::PhantomData<E>,
 }
 
+impl<E: fmt::Debug> fmt::Debug for Iter<E> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_tuple("Iter")
+         .field(&self.clone())
+         .finish()
+    }
+}
+
 // FIXME(#19839) Remove in favor of `#[derive(Clone)]`
 impl<E> Clone for Iter<E> {
     fn clone(&self) -> Iter<E> {
@@ -265,6 +275,9 @@ impl<E: CLike> Iterator for Iter<E> {
     }
 }
 
+#[unstable(feature = "fused", issue = "35602")]
+impl<E: CLike> FusedIterator for Iter<E> {}
+
 impl<E: CLike> FromIterator<E> for EnumSet<E> {
     fn from_iter<I: IntoIterator<Item = E>>(iter: I) -> EnumSet<E> {
         let mut ret = EnumSet::new();
@@ -273,8 +286,8 @@ impl<E: CLike> FromIterator<E> for EnumSet<E> {
     }
 }
 
-#[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, E> IntoIterator for &'a EnumSet<E> where E: CLike
+impl<'a, E> IntoIterator for &'a EnumSet<E>
+    where E: CLike
 {
     type Item = E;
     type IntoIter = Iter<E>;
@@ -292,7 +305,6 @@ impl<E: CLike> Extend<E> for EnumSet<E> {
     }
 }
 
-#[stable(feature = "extend_ref", since = "1.2.0")]
 impl<'a, E: 'a + CLike + Copy> Extend<&'a E> for EnumSet<E> {
     fn extend<I: IntoIterator<Item = &'a E>>(&mut self, iter: I) {
         self.extend(iter.into_iter().cloned());

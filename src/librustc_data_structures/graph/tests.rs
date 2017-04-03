@@ -11,8 +11,6 @@
 use graph::*;
 use std::fmt::Debug;
 
-type TestNode = Node<&'static str>;
-type TestEdge = Edge<&'static str>;
 type TestGraph = Graph<&'static str, &'static str>;
 
 fn create_graph() -> TestGraph {
@@ -20,10 +18,13 @@ fn create_graph() -> TestGraph {
 
     // Create a simple graph
     //
-    //    A -+> B --> C
-    //       |  |     ^
-    //       |  v     |
-    //       F  D --> E
+    //          F
+    //          |
+    //          V
+    //    A --> B --> C
+    //          |     ^
+    //          v     |
+    //          D --> E
 
     let a = graph.add_node("A");
     let b = graph.add_node("B");
@@ -38,6 +39,29 @@ fn create_graph() -> TestGraph {
     graph.add_edge(d, e, "DE");
     graph.add_edge(e, c, "EC");
     graph.add_edge(f, b, "FB");
+
+    return graph;
+}
+
+fn create_graph_with_cycle() -> TestGraph {
+    let mut graph = Graph::new();
+
+    // Create a graph with a cycle.
+    //
+    //    A --> B <-- +
+    //          |     |
+    //          v     |
+    //          C --> D
+
+    let a = graph.add_node("A");
+    let b = graph.add_node("B");
+    let c = graph.add_node("C");
+    let d = graph.add_node("D");
+
+    graph.add_edge(a, b, "AB");
+    graph.add_edge(b, c, "BC");
+    graph.add_edge(c, d, "CD");
+    graph.add_edge(d, b, "DB");
 
     return graph;
 }
@@ -64,11 +88,11 @@ fn each_edge() {
     });
 }
 
-fn test_adjacent_edges<N:PartialEq+Debug,E:PartialEq+Debug>(graph: &Graph<N,E>,
-                                                            start_index: NodeIndex,
-                                                            start_data: N,
-                                                            expected_incoming: &[(E,N)],
-                                                            expected_outgoing: &[(E,N)]) {
+fn test_adjacent_edges<N: PartialEq + Debug, E: PartialEq + Debug>(graph: &Graph<N, E>,
+                                                                   start_index: NodeIndex,
+                                                                   start_data: N,
+                                                                   expected_incoming: &[(E, N)],
+                                                                   expected_outgoing: &[(E, N)]) {
     assert!(graph.node_data(start_index) == &start_data);
 
     let mut counter = 0;
@@ -76,7 +100,10 @@ fn test_adjacent_edges<N:PartialEq+Debug,E:PartialEq+Debug>(graph: &Graph<N,E>,
         assert!(graph.edge_data(edge_index) == &edge.data);
         assert!(counter < expected_incoming.len());
         debug!("counter={:?} expected={:?} edge_index={:?} edge={:?}",
-               counter, expected_incoming[counter], edge_index, edge);
+               counter,
+               expected_incoming[counter],
+               edge_index,
+               edge);
         match expected_incoming[counter] {
             (ref e, ref n) => {
                 assert!(e == &edge.data);
@@ -93,7 +120,10 @@ fn test_adjacent_edges<N:PartialEq+Debug,E:PartialEq+Debug>(graph: &Graph<N,E>,
         assert!(graph.edge_data(edge_index) == &edge.data);
         assert!(counter < expected_outgoing.len());
         debug!("counter={:?} expected={:?} edge_index={:?} edge={:?}",
-               counter, expected_outgoing[counter], edge_index, edge);
+               counter,
+               expected_outgoing[counter],
+               edge_index,
+               edge);
         match expected_outgoing[counter] {
             (ref e, ref n) => {
                 assert!(e == &edge.data);
@@ -109,31 +139,39 @@ fn test_adjacent_edges<N:PartialEq+Debug,E:PartialEq+Debug>(graph: &Graph<N,E>,
 #[test]
 fn each_adjacent_from_a() {
     let graph = create_graph();
-    test_adjacent_edges(&graph, NodeIndex(0), "A",
-                        &[],
-                        &[("AB", "B")]);
+    test_adjacent_edges(&graph, NodeIndex(0), "A", &[], &[("AB", "B")]);
 }
 
 #[test]
 fn each_adjacent_from_b() {
     let graph = create_graph();
-    test_adjacent_edges(&graph, NodeIndex(1), "B",
-                        &[("FB", "F"), ("AB", "A"),],
-                        &[("BD", "D"), ("BC", "C"),]);
+    test_adjacent_edges(&graph,
+                        NodeIndex(1),
+                        "B",
+                        &[("FB", "F"), ("AB", "A")],
+                        &[("BD", "D"), ("BC", "C")]);
 }
 
 #[test]
 fn each_adjacent_from_c() {
     let graph = create_graph();
-    test_adjacent_edges(&graph, NodeIndex(2), "C",
-                        &[("EC", "E"), ("BC", "B")],
-                        &[]);
+    test_adjacent_edges(&graph, NodeIndex(2), "C", &[("EC", "E"), ("BC", "B")], &[]);
 }
 
 #[test]
 fn each_adjacent_from_d() {
     let graph = create_graph();
-    test_adjacent_edges(&graph, NodeIndex(3), "D",
-                        &[("BD", "B")],
-                        &[("DE", "E")]);
+    test_adjacent_edges(&graph, NodeIndex(3), "D", &[("BD", "B")], &[("DE", "E")]);
+}
+
+#[test]
+fn is_node_cyclic_a() {
+    let graph = create_graph_with_cycle();
+    assert!(!graph.is_node_cyclic(NodeIndex(0)));
+}
+
+#[test]
+fn is_node_cyclic_b() {
+    let graph = create_graph_with_cycle();
+    assert!(graph.is_node_cyclic(NodeIndex(1)));
 }

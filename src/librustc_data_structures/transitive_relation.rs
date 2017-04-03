@@ -9,12 +9,13 @@
 // except according to those terms.
 
 use bitvec::BitMatrix;
+use rustc_serialize::{Encodable, Encoder, Decodable, Decoder};
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::mem;
 
 #[derive(Clone)]
-pub struct TransitiveRelation<T:Debug+PartialEq> {
+pub struct TransitiveRelation<T: Debug + PartialEq> {
     // List of elements. This is used to map from a T to a usize.  We
     // expect domain to be small so just use a linear list versus a
     // hashmap or something.
@@ -33,23 +34,29 @@ pub struct TransitiveRelation<T:Debug+PartialEq> {
     // are added with new elements. Perhaps better would be to ask the
     // user for a batch of edges to minimize this effect, but I
     // already wrote the code this way. :P -nmatsakis
-    closure: RefCell<Option<BitMatrix>>
+    closure: RefCell<Option<BitMatrix>>,
 }
 
-#[derive(Clone, PartialEq, PartialOrd)]
+#[derive(Clone, PartialEq, PartialOrd, RustcEncodable, RustcDecodable)]
 struct Index(usize);
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, RustcEncodable, RustcDecodable)]
 struct Edge {
     source: Index,
     target: Index,
 }
 
-impl<T:Debug+PartialEq> TransitiveRelation<T> {
+impl<T: Debug + PartialEq> TransitiveRelation<T> {
     pub fn new() -> TransitiveRelation<T> {
-        TransitiveRelation { elements: vec![],
-                             edges: vec![],
-                             closure: RefCell::new(None) }
+        TransitiveRelation {
+            elements: vec![],
+            edges: vec![],
+            closure: RefCell::new(None),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.edges.is_empty()
     }
 
     fn index(&self, a: &T) -> Option<Index> {
@@ -74,7 +81,10 @@ impl<T:Debug+PartialEq> TransitiveRelation<T> {
     pub fn add(&mut self, a: T, b: T) {
         let a = self.add_index(a);
         let b = self.add_index(b);
-        let edge = Edge { source: a, target: b };
+        let edge = Edge {
+            source: a,
+            target: b,
+        };
         if !self.edges.contains(&edge) {
             self.edges.push(edge);
 
@@ -86,10 +96,8 @@ impl<T:Debug+PartialEq> TransitiveRelation<T> {
     /// Check whether `a < target` (transitively)
     pub fn contains(&self, a: &T, b: &T) -> bool {
         match (self.index(a), self.index(b)) {
-            (Some(a), Some(b)) =>
-                self.with_closure(|closure| closure.contains(a.0, b.0)),
-            (None, _) | (_, None) =>
-                false,
+            (Some(a), Some(b)) => self.with_closure(|closure| closure.contains(a.0, b.0)),
+            (None, _) | (_, None) => false,
         }
     }
 
@@ -156,7 +164,9 @@ impl<T:Debug+PartialEq> TransitiveRelation<T> {
     pub fn minimal_upper_bounds(&self, a: &T, b: &T) -> Vec<&T> {
         let (mut a, mut b) = match (self.index(a), self.index(b)) {
             (Some(a), Some(b)) => (a, b),
-            (None, _) | (_, None) => { return vec![]; }
+            (None, _) | (_, None) => {
+                return vec![];
+            }
         };
 
         // in some cases, there are some arbitrary choices to be made;
@@ -233,7 +243,7 @@ impl<T:Debug+PartialEq> TransitiveRelation<T> {
                    .collect()
     }
 
-    fn with_closure<OP,R>(&self, op: OP) -> R
+    fn with_closure<OP, R>(&self, op: OP) -> R
         where OP: FnOnce(&BitMatrix) -> R
     {
         let mut closure_cell = self.closure.borrow_mut();
@@ -247,7 +257,8 @@ impl<T:Debug+PartialEq> TransitiveRelation<T> {
     }
 
     fn compute_closure(&self) -> BitMatrix {
-        let mut matrix = BitMatrix::new(self.elements.len());
+        let mut matrix = BitMatrix::new(self.elements.len(),
+                                        self.elements.len());
         let mut changed = true;
         while changed {
             changed = false;
@@ -296,6 +307,30 @@ fn pare_down(candidates: &mut Vec<usize>, closure: &BitMatrix) {
             j += 1;
         }
         candidates.truncate(j - dead);
+    }
+}
+
+impl<T> Encodable for TransitiveRelation<T>
+    where T: Encodable + Debug + PartialEq
+{
+    fn encode<E: Encoder>(&self, s: &mut E) -> Result<(), E::Error> {
+        s.emit_struct("TransitiveRelation", 2, |s| {
+            s.emit_struct_field("elements", 0, |s| self.elements.encode(s))?;
+            s.emit_struct_field("edges", 1, |s| self.edges.encode(s))?;
+            Ok(())
+        })
+    }
+}
+
+impl<T> Decodable for TransitiveRelation<T>
+    where T: Decodable + Debug + PartialEq
+{
+    fn decode<D: Decoder>(d: &mut D) -> Result<Self, D::Error> {
+        d.read_struct("TransitiveRelation", 2, |d| {
+            let elements = d.read_struct_field("elements", 0, |d| Decodable::decode(d))?;
+            let edges = d.read_struct_field("edges", 1, |d| Decodable::decode(d))?;
+            Ok(TransitiveRelation { elements, edges, closure: RefCell::new(None) })
+        })
     }
 }
 
@@ -431,14 +466,15 @@ fn pdub_crisscross() {
     // b -> b1 ---+
 
     let mut relation = TransitiveRelation::new();
-    relation.add("a",  "a1");
-    relation.add("a",  "b1");
-    relation.add("b",  "a1");
-    relation.add("b",  "b1");
+    relation.add("a", "a1");
+    relation.add("a", "b1");
+    relation.add("b", "a1");
+    relation.add("b", "b1");
     relation.add("a1", "x");
     relation.add("b1", "x");
 
-    assert_eq!(relation.minimal_upper_bounds(&"a", &"b"), vec![&"a1", &"b1"]);
+    assert_eq!(relation.minimal_upper_bounds(&"a", &"b"),
+               vec![&"a1", &"b1"]);
     assert_eq!(relation.postdom_upper_bound(&"a", &"b"), Some(&"x"));
 }
 
@@ -451,23 +487,25 @@ fn pdub_crisscross_more() {
     // b -> b1 -> b2 ---------+
 
     let mut relation = TransitiveRelation::new();
-    relation.add("a",  "a1");
-    relation.add("a",  "b1");
-    relation.add("b",  "a1");
-    relation.add("b",  "b1");
+    relation.add("a", "a1");
+    relation.add("a", "b1");
+    relation.add("b", "a1");
+    relation.add("b", "b1");
 
-    relation.add("a1",  "a2");
-    relation.add("a1",  "b2");
-    relation.add("b1",  "a2");
-    relation.add("b1",  "b2");
+    relation.add("a1", "a2");
+    relation.add("a1", "b2");
+    relation.add("b1", "a2");
+    relation.add("b1", "b2");
 
     relation.add("a2", "a3");
 
     relation.add("a3", "x");
     relation.add("b2", "x");
 
-    assert_eq!(relation.minimal_upper_bounds(&"a", &"b"), vec![&"a1", &"b1"]);
-    assert_eq!(relation.minimal_upper_bounds(&"a1", &"b1"), vec![&"a2", &"b2"]);
+    assert_eq!(relation.minimal_upper_bounds(&"a", &"b"),
+               vec![&"a1", &"b1"]);
+    assert_eq!(relation.minimal_upper_bounds(&"a1", &"b1"),
+               vec![&"a2", &"b2"]);
     assert_eq!(relation.postdom_upper_bound(&"a", &"b"), Some(&"x"));
 }
 
@@ -479,8 +517,8 @@ fn pdub_lub() {
     // b -> b1 ---+
 
     let mut relation = TransitiveRelation::new();
-    relation.add("a",  "a1");
-    relation.add("b",  "b1");
+    relation.add("a", "a1");
+    relation.add("b", "b1");
     relation.add("a1", "x");
     relation.add("b1", "x");
 
@@ -497,9 +535,9 @@ fn mubs_intermediate_node_on_one_side_only() {
 
     // "digraph { a -> c -> d; b -> d; }",
     let mut relation = TransitiveRelation::new();
-    relation.add("a",  "c");
-    relation.add("c",  "d");
-    relation.add("b",  "d");
+    relation.add("a", "c");
+    relation.add("c", "d");
+    relation.add("b", "d");
 
     assert_eq!(relation.minimal_upper_bounds(&"a", &"b"), vec![&"d"]);
 }
@@ -516,11 +554,11 @@ fn mubs_scc_1() {
 
     // "digraph { a -> c -> d; d -> c; a -> d; b -> d; }",
     let mut relation = TransitiveRelation::new();
-    relation.add("a",  "c");
-    relation.add("c",  "d");
-    relation.add("d",  "c");
-    relation.add("a",  "d");
-    relation.add("b",  "d");
+    relation.add("a", "c");
+    relation.add("c", "d");
+    relation.add("d", "c");
+    relation.add("a", "d");
+    relation.add("b", "d");
 
     assert_eq!(relation.minimal_upper_bounds(&"a", &"b"), vec![&"c"]);
 }
@@ -536,11 +574,11 @@ fn mubs_scc_2() {
 
     // "digraph { a -> c -> d; d -> c; b -> d; b -> c; }",
     let mut relation = TransitiveRelation::new();
-    relation.add("a",  "c");
-    relation.add("c",  "d");
-    relation.add("d",  "c");
-    relation.add("b",  "d");
-    relation.add("b",  "c");
+    relation.add("a", "c");
+    relation.add("c", "d");
+    relation.add("d", "c");
+    relation.add("b", "d");
+    relation.add("b", "c");
 
     assert_eq!(relation.minimal_upper_bounds(&"a", &"b"), vec![&"c"]);
 }
@@ -556,12 +594,12 @@ fn mubs_scc_3() {
 
     // "digraph { a -> c -> d -> e -> c; b -> d; b -> e; }",
     let mut relation = TransitiveRelation::new();
-    relation.add("a",  "c");
-    relation.add("c",  "d");
-    relation.add("d",  "e");
-    relation.add("e",  "c");
-    relation.add("b",  "d");
-    relation.add("b",  "e");
+    relation.add("a", "c");
+    relation.add("c", "d");
+    relation.add("d", "e");
+    relation.add("e", "c");
+    relation.add("b", "d");
+    relation.add("b", "e");
 
     assert_eq!(relation.minimal_upper_bounds(&"a", &"b"), vec![&"c"]);
 }
@@ -578,12 +616,12 @@ fn mubs_scc_4() {
 
     // "digraph { a -> c -> d -> e -> c; a -> d; b -> e; }"
     let mut relation = TransitiveRelation::new();
-    relation.add("a",  "c");
-    relation.add("c",  "d");
-    relation.add("d",  "e");
-    relation.add("e",  "c");
-    relation.add("a",  "d");
-    relation.add("b",  "e");
+    relation.add("a", "c");
+    relation.add("c", "d");
+    relation.add("d", "e");
+    relation.add("e", "c");
+    relation.add("a", "d");
+    relation.add("b", "e");
 
     assert_eq!(relation.minimal_upper_bounds(&"a", &"b"), vec![&"c"]);
 }

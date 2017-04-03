@@ -21,14 +21,12 @@
 //! manner we pay a semi-large one-time cost up front for detecting whether a
 //! function is available but afterwards it's just a load and a jump.
 
-use prelude::v1::*;
-
 use ffi::CString;
 use sync::atomic::{AtomicUsize, Ordering};
 use sys::c;
 
 pub fn lookup(module: &str, symbol: &str) -> Option<usize> {
-    let mut module: Vec<u16> = module.utf16_units().collect();
+    let mut module: Vec<u16> = module.encode_utf16().collect();
     module.push(0);
     let symbol = CString::new(symbol).unwrap();
     unsafe {

@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(unboxed_closures)]
+#![feature(fn_traits, unboxed_closures)]
 
 use std::{fmt, ops};
 
@@ -20,8 +20,8 @@ impl<T: fmt::Debug> ops::FnOnce<(),> for Debuger<T> {
     type Output = ();
     fn call_once(self, _args: ()) {
     //~^ ERROR `call_once` has an incompatible type for trait
-    //~| expected "rust-call" fn,
-    //~| found "Rust" fn
+    //~| expected type `extern "rust-call" fn
+    //~| found type `fn
         println!("{:?}", self.x);
     }
 }

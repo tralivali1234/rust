@@ -17,12 +17,14 @@ enum Cake {
 use Cake::*;
 
 const BOO: (Cake, Cake) = (Marmor, BlackForest);
-//~^ ERROR: constant evaluation error: non-constant path in constant expression [E0471]
+//~^ ERROR: constant evaluation error [E0080]
+//~| unimplemented constant expression: enum variants
 const FOO: Cake = BOO.1;
 
 const fn foo() -> Cake {
-    Marmor //~ ERROR: constant evaluation error: non-constant path in constant expression [E0471]
-    //~^ ERROR: non-constant path in constant expression
+    Marmor
+        //~^ ERROR: constant evaluation error [E0080]
+        //~| unimplemented constant expression: enum variants
 }
 
 const WORKS: Cake = Marmor;
@@ -31,8 +33,8 @@ const GOO: Cake = foo();
 
 fn main() {
     match BlackForest {
-        FOO => println!("hi"), //~ NOTE: in pattern here
-        GOO => println!("meh"), //~ NOTE: in pattern here
+        FOO => println!("hi"), //~ NOTE: for pattern here
+        GOO => println!("meh"), //~ NOTE: for pattern here
         WORKS => println!("möp"),
         _ => println!("bye"),
     }

@@ -25,13 +25,14 @@
 use build::{BlockAnd, BlockAndExtension, Builder};
 use build::matches::{Binding, MatchPair, Candidate};
 use hair::*;
-use rustc::mir::repr::*;
+use rustc::mir::*;
+use rustc_data_structures::fx::FxHashMap;
 
 use std::mem;
 
-impl<'a,'tcx> Builder<'a,'tcx> {
+impl<'a, 'gcx, 'tcx> Builder<'a, 'gcx, 'tcx> {
     pub fn simplify_candidate<'pat>(&mut self,
-                                    mut block: BasicBlock,
+                                    block: BasicBlock,
                                     candidate: &mut Candidate<'pat, 'tcx>)
                                     -> BlockAnd<()> {
         // repeatedly simplify match pairs until fixed point is reached
@@ -39,10 +40,8 @@ impl<'a,'tcx> Builder<'a,'tcx> {
             let match_pairs = mem::replace(&mut candidate.match_pairs, vec![]);
             let mut progress = match_pairs.len(); // count how many were simplified
             for match_pair in match_pairs {
-                match self.simplify_match_pair(block, match_pair, candidate) {
-                    Ok(b) => {
-                        block = b;
-                    }
+                match self.simplify_match_pair(match_pair, candidate) {
+                    Ok(()) => {}
                     Err(match_pair) => {
                         candidate.match_pairs.push(match_pair);
                         progress -= 1; // this one was not simplified
@@ -61,14 +60,13 @@ impl<'a,'tcx> Builder<'a,'tcx> {
     /// possible, Err is returned and no changes are made to
     /// candidate.
     fn simplify_match_pair<'pat>(&mut self,
-                                 mut block: BasicBlock,
                                  match_pair: MatchPair<'pat, 'tcx>,
                                  candidate: &mut Candidate<'pat, 'tcx>)
-                                 -> Result<BasicBlock, MatchPair<'pat, 'tcx>> {
+                                 -> Result<(), MatchPair<'pat, 'tcx>> {
         match *match_pair.pattern.kind {
             PatternKind::Wild => {
                 // nothing left to do
-                Ok(block)
+                Ok(())
             }
 
             PatternKind::Binding { name, mutability, mode, var, ty, ref subpattern } => {
@@ -87,7 +85,7 @@ impl<'a,'tcx> Builder<'a,'tcx> {
                     candidate.match_pairs.push(MatchPair::new(match_pair.lvalue, subpattern));
                 }
 
-                Ok(block)
+                Ok(())
             }
 
             PatternKind::Constant { .. } => {
@@ -95,34 +93,55 @@ impl<'a,'tcx> Builder<'a,'tcx> {
                 Err(match_pair)
             }
 
-            PatternKind::Array { ref prefix, ref slice, ref suffix } => {
-                unpack!(block = self.prefix_suffix_slice(&mut candidate.match_pairs,
-                                                         block,
-                                                         match_pair.lvalue.clone(),
-                                                         prefix,
-                                                         slice.as_ref(),
-                                                         suffix));
-                Ok(block)
+            PatternKind::Range { .. } |
+            PatternKind::Slice { .. } => {
+                Err(match_pair)
             }
 
-            PatternKind::Slice { .. } |
-            PatternKind::Range { .. } |
-            PatternKind::Variant { .. } => {
-                // cannot simplify, test is required
-                Err(match_pair)
+            PatternKind::Variant { adt_def, substs, variant_index, ref subpatterns } => {
+                if self.hir.tcx().sess.features.borrow().never_type {
+                    let irrefutable = adt_def.variants.iter().enumerate().all(|(i, v)| {
+                        i == variant_index || {
+                            let mut visited = FxHashMap::default();
+                            let node_set = v.uninhabited_from(&mut visited,
+                                                              self.hir.tcx(),
+                                                              substs,
+                                                              adt_def.adt_kind());
+                            !node_set.is_empty()
+                        }
+                    });
+                    if irrefutable {
+                        let lvalue = match_pair.lvalue.downcast(adt_def, variant_index);
+                        candidate.match_pairs.extend(self.field_match_pairs(lvalue, subpatterns));
+                        Ok(())
+                    } else {
+                        Err(match_pair)
+                    }
+                } else {
+                    Err(match_pair)
+                }
+            },
+
+            PatternKind::Array { ref prefix, ref slice, ref suffix } => {
+                self.prefix_slice_suffix(&mut candidate.match_pairs,
+                                         &match_pair.lvalue,
+                                         prefix,
+                                         slice.as_ref(),
+                                         suffix);
+                Ok(())
             }
 
             PatternKind::Leaf { ref subpatterns } => {
                 // tuple struct, match subpats (if any)
                 candidate.match_pairs
                          .extend(self.field_match_pairs(match_pair.lvalue, subpatterns));
-                Ok(block)
+                Ok(())
             }
 
             PatternKind::Deref { ref subpattern } => {
                 let lvalue = match_pair.lvalue.deref();
                 candidate.match_pairs.push(MatchPair::new(lvalue, subpattern));
-                Ok(block)
+                Ok(())
             }
         }
     }

@@ -8,19 +8,13 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(type_macros)]
-
 // (typeof used because it's surprisingly hard to find an unparsed token after a stmt)
 macro_rules! m {
-    () => ( i ; typeof );   //~ ERROR `typeof` is a reserved keyword
-                            //~| ERROR macro expansion ignores token `typeof`
+    () => ( i ; typeof );   //~ ERROR expected expression, found reserved keyword `typeof`
                             //~| ERROR macro expansion ignores token `typeof`
                             //~| ERROR macro expansion ignores token `;`
                             //~| ERROR macro expansion ignores token `;`
-                            //~| ERROR macro expansion ignores token `i`
 }
-
-m!();               //~ NOTE the usage of `m!` is likely invalid in item context
 
 fn main() {
     let a: m!();    //~ NOTE the usage of `m!` is likely invalid in type context
@@ -29,5 +23,5 @@ fn main() {
         m!() => {}  //~ NOTE the usage of `m!` is likely invalid in pattern context
     }
 
-    m!();           //~ NOTE the usage of `m!` is likely invalid in statement context
+    m!();
 }

@@ -23,5 +23,6 @@ fn main() {
         call_it(|| x.gen());
         call_it(|| x.gen_mut()); //~ ERROR cannot borrow data mutably in a captured outer
         //~^ ERROR cannot borrow data mutably in a captured outer
+        //~| HELP consider changing this closure to take self by mutable reference
     });
 }

@@ -8,10 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use prelude::v1::*;
-
 use alloc::boxed::FnBox;
 use io;
+use ffi::CStr;
 use mem;
 use libc::c_void;
 use ptr;
@@ -54,7 +53,7 @@ impl Thread {
         }
     }
 
-    pub fn set_name(_name: &str) {
+    pub fn set_name(_name: &CStr) {
         // Windows threads are nameless
         // The names in MSVC debugger are obtained using a "magic" exception,
         // which requires a use of MS C++ extensions.
@@ -83,6 +82,7 @@ impl Thread {
     pub fn into_handle(self) -> Handle { self.handle }
 }
 
+#[cfg_attr(test, allow(dead_code))]
 pub mod guard {
     pub unsafe fn current() -> Option<usize> { None }
     pub unsafe fn init() -> Option<usize> { None }

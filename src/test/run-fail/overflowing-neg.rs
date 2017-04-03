@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// error-pattern:thread '<main>' panicked at 'attempted to negate with overflow'
+// error-pattern:thread 'main' panicked at 'attempt to negate with overflow'
 // compile-flags: -C debug-assertions
 
 fn main() {

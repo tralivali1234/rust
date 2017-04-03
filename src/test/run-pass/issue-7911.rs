@@ -8,12 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-pretty
-
 // (Closes #7911) Test that we can use the same self expression
 // with different mutability in macro in two methods
 
-#![allow(unused_variable)] // unused foobar_immut + foobar_mut
+#![allow(unused_variables)] // unused foobar_immut + foobar_mut
 trait FooBar {
     fn dummy(&self) { }
 }

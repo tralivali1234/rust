@@ -13,5 +13,6 @@ struct S<'a, T:'a> {
 }
 
 fn main() {
-    S { o: &None }; //~ ERROR type annotations or generic parameter binding required
+    S { o: &None }; //~ ERROR type annotations needed [E0282]
+                    //~| NOTE cannot infer type for `T`
 }

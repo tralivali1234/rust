@@ -11,5 +11,5 @@
 fn main() {
     // Unconstrained type:
     format!("{:?}", None);
-    //~^ ERROR type annotations or generic parameter binding required
+    //~^ ERROR type annotations needed [E0282]
 }

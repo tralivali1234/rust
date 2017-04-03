@@ -8,13 +8,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+#![feature(rand)]
+
 // ensure that the ThreadRng isn't/doesn't become accidentally sendable.
 
-use std::rand;
+use std::__rand::ThreadRng;
 
 fn test_send<S: Send>() {}
 
 pub fn main() {
-    test_send::<rand::ThreadRng>();
-    //~^ ERROR `core::marker::Send` is not implemented
+    test_send::<ThreadRng>(); //~ ERROR std::marker::Send` is not satisfied
 }

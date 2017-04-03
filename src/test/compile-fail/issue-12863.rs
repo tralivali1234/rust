@@ -12,6 +12,6 @@ mod foo { pub fn bar() {} }
 
 fn main() {
     match () {
-        foo::bar => {} //~ ERROR `bar` is not an enum variant, struct or const
+        foo::bar => {} //~ ERROR expected unit struct/variant or constant, found function `foo::bar`
     }
 }

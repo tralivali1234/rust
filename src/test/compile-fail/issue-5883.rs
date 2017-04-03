@@ -15,11 +15,9 @@ struct Struct {
 }
 
 fn new_struct(r: A+'static)
-    -> Struct { //~^  ERROR the trait `core::marker::Sized` is not implemented
-    //~^ ERROR the trait `core::marker::Sized` is not implemented
+    -> Struct { //~^  ERROR `A + 'static: std::marker::Sized` is not satisfied
+    //~^ ERROR `A + 'static: std::marker::Sized` is not satisfied
     Struct { r: r }
 }
 
-trait Curve {}
-enum E {X(Curve+'static)}
 fn main() {}

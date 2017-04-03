@@ -11,6 +11,7 @@
 //! A wrapper around another RNG that reseeds it after it
 //! generates a certain number of random bytes.
 
+use core::fmt;
 use {Rng, SeedableRng};
 
 /// How many bytes of entropy the underling RNG is allowed to generate
@@ -54,7 +55,6 @@ impl<R: Rng, Rsdr: Reseeder<R>> ReseedingRng<R, Rsdr> {
     }
 }
 
-
 impl<R: Rng, Rsdr: Reseeder<R>> Rng for ReseedingRng<R, Rsdr> {
     fn next_u32(&mut self) -> u32 {
         self.reseed_if_necessary();
@@ -83,8 +83,8 @@ impl<S, R: SeedableRng<S>, Rsdr: Reseeder<R> + Default>
         self.bytes_generated = 0;
     }
 
-    /// Create a new `ReseedingRng` from the given reseeder and
-    /// seed. This uses a default value for `generation_threshold`.
+/// Create a new `ReseedingRng` from the given reseeder and
+/// seed. This uses a default value for `generation_threshold`.
     fn from_seed((rsdr, seed): (Rsdr, S)) -> ReseedingRng<R, Rsdr> {
         ReseedingRng {
             rng: SeedableRng::from_seed(seed),
@@ -92,6 +92,17 @@ impl<S, R: SeedableRng<S>, Rsdr: Reseeder<R> + Default>
             bytes_generated: 0,
             reseeder: rsdr,
         }
+    }
+}
+
+impl<R: fmt::Debug, Rsdr: fmt::Debug> fmt::Debug for ReseedingRng<R, Rsdr> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ReseedingRng")
+         .field("rng", &self.rng)
+         .field("generation_threshold", &self.generation_threshold)
+         .field("bytes_generated", &self.bytes_generated)
+         .field("reseeder", &self.reseeder)
+         .finish()
     }
 }
 
@@ -103,7 +114,7 @@ pub trait Reseeder<R> {
 
 /// Reseed an RNG using a `Default` instance. This reseeds by
 /// replacing the RNG with the result of a `Default::default` call.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct ReseedWithDefault;
 
 impl<R: Rng + Default> Reseeder<R> for ReseedWithDefault {
@@ -113,6 +124,7 @@ impl<R: Rng + Default> Reseeder<R> for ReseedWithDefault {
 }
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Default for ReseedWithDefault {
+    /// Creates an instance of `ReseedWithDefault`.
     fn default() -> ReseedWithDefault {
         ReseedWithDefault
     }
@@ -122,8 +134,8 @@ impl Default for ReseedWithDefault {
 mod tests {
     use std::prelude::v1::*;
 
-    use super::{ReseedingRng, ReseedWithDefault};
-    use {SeedableRng, Rng};
+    use super::{ReseedWithDefault, ReseedingRng};
+    use {Rng, SeedableRng};
 
     struct Counter {
         i: u32,
@@ -137,6 +149,7 @@ mod tests {
         }
     }
     impl Default for Counter {
+        /// Constructs a `Counter` with initial value zero.
         fn default() -> Counter {
             Counter { i: 0 }
         }
@@ -166,8 +179,9 @@ mod tests {
     fn test_rng_seeded() {
         let mut ra: MyRng = SeedableRng::from_seed((ReseedWithDefault, 2));
         let mut rb: MyRng = SeedableRng::from_seed((ReseedWithDefault, 2));
-        assert!(ra.gen_ascii_chars().take(100)
-                  .eq(rb.gen_ascii_chars().take(100)));
+        assert!(ra.gen_ascii_chars()
+            .take(100)
+            .eq(rb.gen_ascii_chars().take(100)));
     }
 
     #[test]

@@ -8,17 +8,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use prelude::v1::*;
 use io::prelude::*;
 
-use cell::{RefCell, BorrowState};
-use cmp;
+use cell::RefCell;
 use fmt;
 use io::lazy::Lazy;
 use io::{self, BufReader, LineWriter};
 use sync::{Arc, Mutex, MutexGuard};
 use sys::stdio;
-use sys_common::io::{read_to_end_uninitialized};
 use sys_common::remutex::{ReentrantMutex, ReentrantMutexGuard};
 use thread::LocalKeyState;
 
@@ -78,14 +75,17 @@ fn stderr_raw() -> io::Result<StderrRaw> { stdio::Stderr::new().map(StderrRaw) }
 
 impl Read for StdinRaw {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> { self.0.read(buf) }
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
+        self.0.read_to_end(buf)
+    }
 }
 impl Write for StdoutRaw {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.0.write(buf) }
-    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    fn flush(&mut self) -> io::Result<()> { self.0.flush() }
 }
 impl Write for StderrRaw {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> { self.0.write(buf) }
-    fn flush(&mut self) -> io::Result<()> { Ok(()) }
+    fn flush(&mut self) -> io::Result<()> { self.0.flush() }
 }
 
 enum Maybe<T> {
@@ -112,20 +112,23 @@ impl<W: io::Write> io::Write for Maybe<W> {
 impl<R: io::Read> io::Read for Maybe<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         match *self {
-            Maybe::Real(ref mut r) => handle_ebadf(r.read(buf), buf.len()),
+            Maybe::Real(ref mut r) => handle_ebadf(r.read(buf), 0),
+            Maybe::Fake => Ok(0)
+        }
+    }
+    fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
+        match *self {
+            Maybe::Real(ref mut r) => handle_ebadf(r.read_to_end(buf), 0),
             Maybe::Fake => Ok(0)
         }
     }
 }
 
 fn handle_ebadf<T>(r: io::Result<T>, default: T) -> io::Result<T> {
-    #[cfg(windows)]
-    const ERR: i32 = ::sys::c::ERROR_INVALID_HANDLE as i32;
-    #[cfg(not(windows))]
-    const ERR: i32 = ::libc::EBADF as i32;
+    use sys::stdio::EBADF_ERR;
 
     match r {
-        Err(ref e) if e.raw_os_error() == Some(ERR) => Ok(default),
+        Err(ref e) if e.raw_os_error() == Some(EBADF_ERR) => Ok(default),
         r => r
     }
 }
@@ -133,14 +136,17 @@ fn handle_ebadf<T>(r: io::Result<T>, default: T) -> io::Result<T> {
 /// A handle to the standard input stream of a process.
 ///
 /// Each handle is a shared reference to a global buffer of input data to this
-/// process. A handle can be `lock`'d to gain full access to `BufRead` methods
-/// (e.g. `.lines()`). Writes to this handle are otherwise locked with respect
-/// to other writes.
+/// process. A handle can be `lock`'d to gain full access to [`BufRead`] methods
+/// (e.g. `.lines()`). Reads to this handle are otherwise locked with respect
+/// to other reads.
 ///
 /// This handle implements the `Read` trait, but beware that concurrent reads
 /// of `Stdin` must be executed with care.
 ///
-/// Created by the function `io::stdin()`.
+/// Created by the [`io::stdin`] method.
+///
+/// [`io::stdin`]: fn.stdin.html
+/// [`BufRead`]: trait.BufRead.html
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct Stdin {
     inner: Arc<Mutex<BufReader<Maybe<StdinRaw>>>>,
@@ -148,8 +154,12 @@ pub struct Stdin {
 
 /// A locked reference to the `Stdin` handle.
 ///
-/// This handle implements both the `Read` and `BufRead` traits and is
-/// constructed via the `lock` method on `Stdin`.
+/// This handle implements both the [`Read`] and [`BufRead`] traits, and
+/// is constructed via the [`Stdin::lock`] method.
+///
+/// [`Read`]: trait.Read.html
+/// [`BufRead`]: trait.BufRead.html
+/// [`Stdin::lock`]: struct.Stdin.html#method.lock
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct StdinLock<'a> {
     inner: MutexGuard<'a, BufReader<Maybe<StdinRaw>>>,
@@ -159,7 +169,7 @@ pub struct StdinLock<'a> {
 ///
 /// Each handle returned is a reference to a shared global buffer whose access
 /// is synchronized via a mutex. If you need more explicit control over
-/// locking, see the [lock() method][lock].
+/// locking, see the [`lock() method`][lock].
 ///
 /// [lock]: struct.Stdin.html#method.lock
 ///
@@ -172,7 +182,7 @@ pub struct StdinLock<'a> {
 ///
 /// # fn foo() -> io::Result<String> {
 /// let mut buffer = String::new();
-/// try!(io::stdin().read_to_string(&mut buffer));
+/// io::stdin().read_to_string(&mut buffer)?;
 /// # Ok(buffer)
 /// # }
 /// ```
@@ -187,7 +197,7 @@ pub struct StdinLock<'a> {
 /// let stdin = io::stdin();
 /// let mut handle = stdin.lock();
 ///
-/// try!(handle.read_to_string(&mut buffer));
+/// handle.read_to_string(&mut buffer)?;
 /// # Ok(buffer)
 /// # }
 /// ```
@@ -204,15 +214,7 @@ pub fn stdin() -> Stdin {
             _ => Maybe::Fake
         };
 
-        // The default buffer capacity is 64k, but apparently windows
-        // doesn't like 64k reads on stdin. See #13304 for details, but the
-        // idea is that on windows we use a slightly smaller buffer that's
-        // been seen to be acceptable.
-        Arc::new(Mutex::new(if cfg!(windows) {
-            BufReader::with_capacity(8 * 1024, stdin)
-        } else {
-            BufReader::new(stdin)
-        }))
+        Arc::new(Mutex::new(BufReader::with_capacity(stdio::STDIN_BUF_SIZE, stdin)))
     }
 }
 
@@ -221,8 +223,26 @@ impl Stdin {
     /// guard.
     ///
     /// The lock is released when the returned lock goes out of scope. The
-    /// returned guard also implements the `Read` and `BufRead` traits for
+    /// returned guard also implements the [`Read`] and [`BufRead`] traits for
     /// accessing the underlying data.
+    ///
+    /// [`Read`]: trait.Read.html
+    /// [`BufRead`]: trait.BufRead.html
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::{self, Read};
+    ///
+    /// # fn foo() -> io::Result<String> {
+    /// let mut buffer = String::new();
+    /// let stdin = io::stdin();
+    /// let mut handle = stdin.lock();
+    ///
+    /// handle.read_to_string(&mut buffer)?;
+    /// # Ok(buffer)
+    /// # }
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn lock(&self) -> StdinLock {
         StdinLock { inner: self.inner.lock().unwrap_or_else(|e| e.into_inner()) }
@@ -231,7 +251,9 @@ impl Stdin {
     /// Locks this handle and reads a line of input into the specified buffer.
     ///
     /// For detailed semantics of this method, see the documentation on
-    /// `BufRead::read_line`.
+    /// [`BufRead::read_line`].
+    ///
+    /// [`BufRead::read_line`]: trait.BufRead.html#method.read_line
     ///
     /// # Examples
     ///
@@ -252,11 +274,18 @@ impl Stdin {
     ///
     /// - Pipe some text to it, e.g. `printf foo | path/to/executable`
     /// - Give it text interactively by running the executable directly,
-    //    in which case it will wait for the Enter key to be pressed before
+    ///   in which case it will wait for the Enter key to be pressed before
     ///   continuing
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn read_line(&self, buf: &mut String) -> io::Result<usize> {
         self.lock().read_line(buf)
+    }
+}
+
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl fmt::Debug for Stdin {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("Stdin { .. }")
     }
 }
 
@@ -282,7 +311,7 @@ impl<'a> Read for StdinLock<'a> {
         self.inner.read(buf)
     }
     fn read_to_end(&mut self, buf: &mut Vec<u8>) -> io::Result<usize> {
-        unsafe { read_to_end_uninitialized(self, buf) }
+        self.inner.read_to_end(buf)
     }
 }
 
@@ -292,29 +321,23 @@ impl<'a> BufRead for StdinLock<'a> {
     fn consume(&mut self, n: usize) { self.inner.consume(n) }
 }
 
-// As with stdin on windows, stdout often can't handle writes of large
-// sizes. For an example, see #14940. For this reason, don't try to
-// write the entire output buffer on windows. On unix we can just
-// write the whole buffer all at once.
-//
-// For some other references, it appears that this problem has been
-// encountered by others [1] [2]. We choose the number 8KB just because
-// libuv does the same.
-//
-// [1]: https://tahoe-lafs.org/trac/tahoe-lafs/ticket/1232
-// [2]: http://www.mail-archive.com/log4net-dev@logging.apache.org/msg00661.html
-#[cfg(windows)]
-const OUT_MAX: usize = 8192;
-#[cfg(unix)]
-const OUT_MAX: usize = ::usize::MAX;
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl<'a> fmt::Debug for StdinLock<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("StdinLock { .. }")
+    }
+}
 
 /// A handle to the global standard output stream of the current process.
 ///
 /// Each handle shares a global buffer of data to be written to the standard
 /// output stream. Access is also synchronized via a lock and explicit control
-/// over locking is available via the `lock` method.
+/// over locking is available via the [`lock`] method.
 ///
-/// Created by the function `io::stdout()`.
+/// Created by the [`io::stdout`] method.
+///
+/// [`lock`]: #method.lock
+/// [`io::stdout`]: fn.stdout.html
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct Stdout {
     // FIXME: this should be LineWriter or BufWriter depending on the state of
@@ -325,8 +348,11 @@ pub struct Stdout {
 
 /// A locked reference to the `Stdout` handle.
 ///
-/// This handle implements the `Write` trait and is constructed via the `lock`
-/// method on `Stdout`.
+/// This handle implements the [`Write`] trait, and is constructed via
+/// the [`Stdout::lock`] method.
+///
+/// [`Write`]: trait.Write.html
+/// [`Stdout::lock`]: struct.Stdout.html#method.lock
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct StdoutLock<'a> {
     inner: ReentrantMutexGuard<'a, RefCell<LineWriter<Maybe<StdoutRaw>>>>,
@@ -336,9 +362,9 @@ pub struct StdoutLock<'a> {
 ///
 /// Each handle returned is a reference to a shared global buffer whose access
 /// is synchronized via a mutex. If you need more explicit control over
-/// locking, see the [lock() method][lock].
+/// locking, see the [Stdout::lock] method.
 ///
-/// [lock]: struct.Stdout.html#method.lock
+/// [Stdout::lock]: struct.Stdout.html#method.lock
 ///
 /// # Examples
 ///
@@ -348,7 +374,7 @@ pub struct StdoutLock<'a> {
 /// use std::io::{self, Write};
 ///
 /// # fn foo() -> io::Result<()> {
-/// try!(io::stdout().write(b"hello world"));
+/// io::stdout().write(b"hello world")?;
 ///
 /// # Ok(())
 /// # }
@@ -363,7 +389,7 @@ pub struct StdoutLock<'a> {
 /// let stdout = io::stdout();
 /// let mut handle = stdout.lock();
 ///
-/// try!(handle.write(b"hello world"));
+/// handle.write(b"hello world")?;
 ///
 /// # Ok(())
 /// # }
@@ -391,9 +417,31 @@ impl Stdout {
     ///
     /// The lock is released when the returned lock goes out of scope. The
     /// returned guard also implements the `Write` trait for writing data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::{self, Write};
+    ///
+    /// # fn foo() -> io::Result<()> {
+    /// let stdout = io::stdout();
+    /// let mut handle = stdout.lock();
+    ///
+    /// handle.write(b"hello world")?;
+    ///
+    /// # Ok(())
+    /// # }
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn lock(&self) -> StdoutLock {
         StdoutLock { inner: self.inner.lock().unwrap_or_else(|e| e.into_inner()) }
+    }
+}
+
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl fmt::Debug for Stdout {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("Stdout { .. }")
     }
 }
 
@@ -415,16 +463,25 @@ impl Write for Stdout {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> Write for StdoutLock<'a> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.inner.borrow_mut().write(&buf[..cmp::min(buf.len(), OUT_MAX)])
+        self.inner.borrow_mut().write(buf)
     }
     fn flush(&mut self) -> io::Result<()> {
         self.inner.borrow_mut().flush()
     }
 }
 
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl<'a> fmt::Debug for StdoutLock<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("StdoutLock { .. }")
+    }
+}
+
 /// A handle to the standard error stream of a process.
 ///
-/// For more information, see `stderr`
+/// For more information, see the [`io::stderr`] method.
+///
+/// [`io::stderr`]: fn.stderr.html
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct Stderr {
     inner: Arc<ReentrantMutex<RefCell<Maybe<StderrRaw>>>>,
@@ -432,8 +489,10 @@ pub struct Stderr {
 
 /// A locked reference to the `Stderr` handle.
 ///
-/// This handle implements the `Write` trait and is constructed via the `lock`
-/// method on `Stderr`.
+/// This handle implements the `Write` trait and is constructed via
+/// the [`Stderr::lock`] method.
+///
+/// [`Stderr::lock`]: struct.Stderr.html#method.lock
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct StderrLock<'a> {
     inner: ReentrantMutexGuard<'a, RefCell<Maybe<StderrRaw>>>,
@@ -451,7 +510,7 @@ pub struct StderrLock<'a> {
 /// use std::io::{self, Write};
 ///
 /// # fn foo() -> io::Result<()> {
-/// try!(io::stderr().write(b"hello world"));
+/// io::stderr().write(b"hello world")?;
 ///
 /// # Ok(())
 /// # }
@@ -466,7 +525,7 @@ pub struct StderrLock<'a> {
 /// let stderr = io::stderr();
 /// let mut handle = stderr.lock();
 ///
-/// try!(handle.write(b"hello world"));
+/// handle.write(b"hello world")?;
 ///
 /// # Ok(())
 /// # }
@@ -493,9 +552,31 @@ impl Stderr {
     ///
     /// The lock is released when the returned lock goes out of scope. The
     /// returned guard also implements the `Write` trait for writing data.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::io::{self, Write};
+    ///
+    /// fn foo() -> io::Result<()> {
+    ///     let stderr = io::stderr();
+    ///     let mut handle = stderr.lock();
+    ///
+    ///     handle.write(b"hello world")?;
+    ///
+    ///     Ok(())
+    /// }
+    /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn lock(&self) -> StderrLock {
         StderrLock { inner: self.inner.lock().unwrap_or_else(|e| e.into_inner()) }
+    }
+}
+
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl fmt::Debug for Stderr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("Stderr { .. }")
     }
 }
 
@@ -517,10 +598,17 @@ impl Write for Stderr {
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> Write for StderrLock<'a> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.inner.borrow_mut().write(&buf[..cmp::min(buf.len(), OUT_MAX)])
+        self.inner.borrow_mut().write(buf)
     }
     fn flush(&mut self) -> io::Result<()> {
         self.inner.borrow_mut().flush()
+    }
+}
+
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl<'a> fmt::Debug for StderrLock<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("StderrLock { .. }")
     }
 }
 
@@ -537,11 +625,11 @@ impl<'a> Write for StderrLock<'a> {
                      with a more general mechanism",
            issue = "0")]
 #[doc(hidden)]
-pub fn set_panic(sink: Box<Write + Send>) -> Option<Box<Write + Send>> {
+pub fn set_panic(sink: Option<Box<Write + Send>>) -> Option<Box<Write + Send>> {
     use panicking::LOCAL_STDERR;
     use mem;
     LOCAL_STDERR.with(move |slot| {
-        mem::replace(&mut *slot.borrow_mut(), Some(sink))
+        mem::replace(&mut *slot.borrow_mut(), sink)
     }).and_then(|mut s| {
         let _ = s.flush();
         Some(s)
@@ -561,10 +649,10 @@ pub fn set_panic(sink: Box<Write + Send>) -> Option<Box<Write + Send>> {
                      with a more general mechanism",
            issue = "0")]
 #[doc(hidden)]
-pub fn set_print(sink: Box<Write + Send>) -> Option<Box<Write + Send>> {
+pub fn set_print(sink: Option<Box<Write + Send>>) -> Option<Box<Write + Send>> {
     use mem;
     LOCAL_STDOUT.with(move |slot| {
-        mem::replace(&mut *slot.borrow_mut(), Some(sink))
+        mem::replace(&mut *slot.borrow_mut(), sink)
     }).and_then(|mut s| {
         let _ = s.flush();
         Some(s)
@@ -592,8 +680,8 @@ pub fn _print(args: fmt::Arguments) {
         LocalKeyState::Destroyed => stdout().write_fmt(args),
         LocalKeyState::Valid => {
             LOCAL_STDOUT.with(|s| {
-                if s.borrow_state() == BorrowState::Unused {
-                    if let Some(w) = s.borrow_mut().as_mut() {
+                if let Ok(mut borrowed) = s.try_borrow_mut() {
+                    if let Some(w) = borrowed.as_mut() {
                         return w.write_fmt(args);
                     }
                 }
@@ -612,6 +700,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg_attr(target_os = "emscripten", ignore)]
     fn panic_doesnt_poison() {
         thread::spawn(|| {
             let _a = stdin();

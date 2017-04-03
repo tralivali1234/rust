@@ -47,7 +47,7 @@
 //! that the contained type `T` is shareable. Additionally, `Arc<T>` is itself
 //! sendable while `Rc<T>` is not.
 //!
-//! This types allows for shared access to the contained data, and is often
+//! This type allows for shared access to the contained data, and is often
 //! paired with synchronization primitives such as mutexes to allow mutation of
 //! shared resources.
 //!
@@ -56,11 +56,8 @@
 //! The [`heap`](heap/index.html) module defines the low-level interface to the
 //! default global allocator. It is not compatible with the libc allocator API.
 
-// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
-#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "alloc"]
 #![crate_type = "rlib"]
-#![cfg_attr(stage0, staged_api)]
 #![allow(unused_attributes)]
 #![unstable(feature = "alloc",
             reason = "this library is unlikely to be stabilized in its current \
@@ -72,54 +69,42 @@
        issue_tracker_base_url = "https://github.com/rust-lang/rust/issues/",
        test(no_crate_inject, attr(allow(unused_variables), deny(warnings))))]
 #![no_std]
-#![cfg_attr(not(stage0), needs_allocator)]
+#![needs_allocator]
+#![deny(warnings)]
 
-#![cfg_attr(stage0, feature(rustc_attrs))]
-#![cfg_attr(stage0, feature(no_std))]
-#![cfg_attr(stage0, allow(unused_attributes))]
 #![feature(allocator)]
 #![feature(box_syntax)]
+#![feature(cfg_target_has_atomic)]
 #![feature(coerce_unsized)]
+#![feature(const_fn)]
 #![feature(core_intrinsics)]
 #![feature(custom_attribute)]
+#![feature(dropck_eyepatch)]
+#![cfg_attr(not(test), feature(exact_size_is_empty))]
 #![feature(fundamental)]
+#![feature(generic_param_attrs)]
 #![feature(lang_items)]
-#![feature(nonzero)]
-#![feature(num_bits_bytes)]
+#![feature(needs_allocator)]
 #![feature(optin_builtin_traits)]
 #![feature(placement_in_syntax)]
-#![feature(placement_new_protocol)]
-#![feature(raw)]
 #![feature(shared)]
 #![feature(staged_api)]
 #![feature(unboxed_closures)]
 #![feature(unique)]
-#![feature(unsafe_no_drop_flag, filling_drop)]
-// SNAP 1af31d4
-#![allow(unused_features)]
-// SNAP 1af31d4
-#![allow(unused_attributes)]
-#![feature(dropck_parametricity)]
 #![feature(unsize)]
-#![feature(drop_in_place)]
-#![feature(fn_traits)]
 
-#![cfg_attr(stage0, feature(alloc_system))]
-#![cfg_attr(not(stage0), feature(needs_allocator))]
-
-#![cfg_attr(test, feature(test, rustc_private, box_heap))]
-
-#[cfg(stage0)]
-extern crate alloc_system;
+#![cfg_attr(not(test), feature(fused, fn_traits, placement_new_protocol))]
+#![cfg_attr(test, feature(test, box_heap))]
 
 // Allow testing this library
 
 #[cfg(test)]
 #[macro_use]
 extern crate std;
-#[cfg(test)]
+
+// Module with internal macros used by other modules (needs to be included before other modules).
 #[macro_use]
-extern crate log;
+mod macros;
 
 // Heaps provided for low-level allocation strategies
 
@@ -139,18 +124,10 @@ mod boxed {
 }
 #[cfg(test)]
 mod boxed_test;
+#[cfg(target_has_atomic = "ptr")]
 pub mod arc;
 pub mod rc;
 pub mod raw_vec;
+pub mod oom;
 
-/// Common out-of-memory routine
-#[cold]
-#[inline(never)]
-#[unstable(feature = "oom", reason = "not a scrutinized interface",
-           issue = "27700")]
-pub fn oom() -> ! {
-    // FIXME(#14674): This really needs to do something other than just abort
-    //                here, but any printing done must be *guaranteed* to not
-    //                allocate.
-    unsafe { core::intrinsics::abort() }
-}
+pub use oom::oom;

@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// error-pattern:thread '<main>' panicked at 'shift operation overflowed'
+// error-pattern:thread 'main' panicked at 'attempt to shift right with overflow'
 // compile-flags: -C debug-assertions
 
 #![warn(exceeding_bitshifts)]

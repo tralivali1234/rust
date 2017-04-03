@@ -29,8 +29,6 @@
 //! CriticalSection is used and we keep track of who's holding the mutex to
 //! detect recursive locks.
 
-use prelude::v1::*;
-
 use cell::UnsafeCell;
 use mem;
 use sync::atomic::{AtomicUsize, Ordering};
@@ -64,6 +62,8 @@ impl Mutex {
             held: UnsafeCell::new(false),
         }
     }
+    #[inline]
+    pub unsafe fn init(&mut self) {}
     pub unsafe fn lock(&self) {
         match kind() {
             Kind::SRWLock => c::AcquireSRWLockExclusive(raw(self)),

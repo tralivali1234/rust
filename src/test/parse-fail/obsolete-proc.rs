@@ -12,8 +12,8 @@
 
 // Test that we generate obsolete syntax errors around usages of `proc`.
 
-fn foo(p: proc()) { } //~ ERROR `proc` is a reserved keyword
+fn foo(p: proc()) { } //~ ERROR expected type, found reserved keyword `proc`
 
-fn bar() { proc() 1; }
+fn bar() { proc() 1; } //~ ERROR expected expression, found reserved keyword `proc`
 
 fn main() { }

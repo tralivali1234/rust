@@ -12,6 +12,7 @@ trait Trait {}
 
 pub fn main() {
     let x: Vec<Trait + Sized> = Vec::new();
-    //~^ ERROR the trait `core::marker::Sized` is not implemented
-    //~^^ ERROR the trait `core::marker::Sized` is not implemented
+    //~^ ERROR only Send/Sync traits can be used as additional traits in a trait object
+    //~| ERROR the trait bound `Trait: std::marker::Sized` is not satisfied
+    //~| ERROR the trait bound `Trait: std::marker::Sized` is not satisfied
 }

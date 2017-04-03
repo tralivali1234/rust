@@ -19,7 +19,8 @@
 // gdb-command:print constant
 // gdb-check:$1 = 1
 // gdb-command:print a_struct
-// gdb-check:$2 = {a = -2, b = 3.5, c = 4}
+// gdbg-check:$2 = {a = -2, b = 3.5, c = 4}
+// gdbr-check:$2 = var_captured_in_sendable_closure::Struct {a: -2, b: 3.5, c: 4}
 // gdb-command:print *owned
 // gdb-check:$3 = 5
 // gdb-command:continue
@@ -40,7 +41,7 @@
 // lldb-check:[...]$2 = 5
 
 #![allow(unused_variables)]
-#![feature(unboxed_closures, box_syntax)]
+#![feature(box_syntax)]
 #![feature(omit_gdb_pretty_printer_section)]
 #![omit_gdb_pretty_printer_section]
 

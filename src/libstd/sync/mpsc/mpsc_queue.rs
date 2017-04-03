@@ -146,10 +146,8 @@ impl<T> Drop for Queue<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "emscripten")))]
 mod tests {
-    use prelude::v1::*;
-
     use sync::mpsc::channel;
     use super::{Queue, Data, Empty, Inconsistent};
     use sync::Arc;

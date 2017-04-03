@@ -23,7 +23,7 @@ mod a {
     pub mod sub {
         use a::b::*;
         fn sub() -> bar { 1 }
-        //~^ ERROR: undeclared type name
+        //~^ ERROR cannot find type `bar` in this scope
     }
 }
 
@@ -32,5 +32,5 @@ mod m1 {
 }
 
 fn main() {
-    foo(); //~ ERROR: unresolved name
+    foo(); //~ ERROR expected function, found module `foo`
 }

@@ -8,7 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-fn std() {}    //~ ERROR the name `std` conflicts with an external crate
+fn std() {}
+mod std {}    //~ ERROR an extern crate named `std` has already been imported
 
 fn main() {
 }

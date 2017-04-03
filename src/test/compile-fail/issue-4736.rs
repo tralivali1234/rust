@@ -11,5 +11,5 @@
 struct NonCopyable(());
 
 fn main() {
-    let z = NonCopyable{ p: () }; //~ ERROR `NonCopyable` does not name a structure
+    let z = NonCopyable{ p: () }; //~ ERROR struct `NonCopyable` has no field named `p`
 }

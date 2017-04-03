@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(repr_simd, platform_intrinsics)]
+#![feature(repr_simd, platform_intrinsics, rustc_attrs)]
 
 #[repr(simd)]
 #[derive(Copy, Clone)]

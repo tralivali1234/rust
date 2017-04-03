@@ -14,11 +14,13 @@
 struct S(i32);
 
 const CONSTANT: S = S(0);
-//~^ ERROR: constant evaluation error: call on struct [E0080]
 
 enum E {
     V = CONSTANT,
-    //~^ NOTE: for enum discriminant here
+    //~^ ERROR mismatched types
+    //~| expected isize, found struct `S`
+    //~| NOTE expected type `isize`
+    //~|         found type `S`
 }
 
 fn main() {}

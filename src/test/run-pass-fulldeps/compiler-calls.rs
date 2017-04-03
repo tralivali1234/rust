@@ -19,11 +19,12 @@ extern crate getopts;
 extern crate rustc;
 extern crate rustc_driver;
 extern crate syntax;
+extern crate rustc_errors as errors;
 
 use rustc::session::Session;
 use rustc::session::config::{self, Input};
 use rustc_driver::{driver, CompilerCalls, Compilation};
-use syntax::{diagnostics, errors};
+use syntax::ast;
 
 use std::path::PathBuf;
 
@@ -34,8 +35,10 @@ struct TestCalls {
 impl<'a> CompilerCalls<'a> for TestCalls {
     fn early_callback(&mut self,
                       _: &getopts::Matches,
-                      _: &diagnostics::registry::Registry,
-                      _: errors::emitter::ColorConfig)
+                      _: &config::Options,
+                      _: &ast::CrateConfig,
+                      _: &errors::registry::Registry,
+                      _: config::ErrorOutputType)
                       -> Compilation {
         self.count *= 2;
         Compilation::Continue
@@ -61,14 +64,18 @@ impl<'a> CompilerCalls<'a> for TestCalls {
     fn no_input(&mut self,
                 _: &getopts::Matches,
                 _: &config::Options,
+                _: &ast::CrateConfig,
                 _: &Option<PathBuf>,
                 _: &Option<PathBuf>,
-                _: &diagnostics::registry::Registry)
+                _: &errors::registry::Registry)
                 -> Option<(Input, Option<PathBuf>)> {
         panic!("This shouldn't happen");
     }
 
-    fn build_controller(&mut self, _: &Session) -> driver::CompileController<'a> {
+    fn build_controller(&mut self,
+                        _: &Session,
+                        _: &getopts::Matches)
+                        -> driver::CompileController<'a> {
         panic!("This shouldn't be called");
     }
 }
@@ -78,6 +85,6 @@ fn main() {
     let mut tc = TestCalls { count: 1 };
     // we should never get use this filename, but lets make sure they are valid args.
     let args = vec!["compiler-calls".to_string(), "foo.rs".to_string()];
-    rustc_driver::run_compiler(&args, &mut tc);
+    rustc_driver::run_compiler(&args, &mut tc, None, None);
     assert_eq!(tc.count, 30);
 }

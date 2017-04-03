@@ -8,12 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// compile-flags: -Z parse-only
+// compile-flags: -Z parse-only -Z continue-parse-after-error
 
 use std::fmt::Debug;
 
 fn main() {
-    let x: Box<Debug+> = box 3 as Box<Debug+>;
-    //~^ ERROR at least one type parameter bound must be specified
-    //~^^ ERROR at least one type parameter bound must be specified
+    let x: Box<Debug+> = box 3 as Box<Debug+>; // Trailing `+` is OK
 }
+
+FAIL //~ ERROR

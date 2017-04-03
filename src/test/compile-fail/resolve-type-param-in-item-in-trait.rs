@@ -13,39 +13,32 @@
 // scope (in this case, the enum).
 
 trait TraitA<A> {
-    fn outer(self) {
+    fn outer(&self) {
         enum Foo<B> {
-            //~^ ERROR parameter `B` is never used
             Variance(A)
                 //~^ ERROR can't use type parameters from outer function
-                //~^^ ERROR use of undeclared type name `A`
         }
     }
 }
 
 trait TraitB<A> {
-    fn outer(self) {
+    fn outer(&self) {
         struct Foo<B>(A);
                 //~^ ERROR can't use type parameters from outer function
-                //~^^ ERROR use of undeclared type name `A`
-                //~^^^ ERROR parameter `B` is never used
     }
 }
 
 trait TraitC<A> {
-    fn outer(self) {
+    fn outer(&self) {
         struct Foo<B> { a: A }
                 //~^ ERROR can't use type parameters from outer function
-                //~^^ ERROR use of undeclared type name `A`
-                //~^^^ ERROR parameter `B` is never used
     }
 }
 
 trait TraitD<A> {
-    fn outer(self) {
+    fn outer(&self) {
         fn foo<B>(a: A) { }
                 //~^ ERROR can't use type parameters from outer function
-                //~^^ ERROR use of undeclared type name `A`
     }
 }
 

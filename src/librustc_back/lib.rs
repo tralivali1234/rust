@@ -21,37 +21,57 @@
 //! one that doesn't; the one that doesn't might get decent parallel
 //! build speedups.
 
-// Do not remove on snapshot creation. Needed for bootstrap. (Issue #22364)
-#![cfg_attr(stage0, feature(custom_attribute))]
 #![crate_name = "rustc_back"]
 #![unstable(feature = "rustc_private", issue = "27812")]
-#![cfg_attr(stage0, staged_api)]
 #![crate_type = "dylib"]
 #![crate_type = "rlib"]
 #![doc(html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
       html_favicon_url = "https://doc.rust-lang.org/favicon.ico",
       html_root_url = "https://doc.rust-lang.org/nightly/")]
+#![deny(warnings)]
 
 #![feature(box_syntax)]
+#![feature(const_fn)]
 #![feature(libc)]
 #![feature(rand)]
 #![feature(rustc_private)]
-#![feature(clone_from_slice)]
 #![feature(staged_api)]
-#![feature(step_by)]
-#![cfg_attr(test, feature(test, rand))]
+#![cfg_attr(test, feature(rand))]
 
 extern crate syntax;
 extern crate libc;
 extern crate serialize;
-extern crate rustc_llvm;
-extern crate rustc_front;
 #[macro_use] extern crate log;
 
-pub mod abi;
+extern crate serialize as rustc_serialize; // used by deriving
+
 pub mod tempdir;
-pub mod rpath;
-pub mod sha2;
-pub mod svh;
 pub mod target;
 pub mod slice;
+pub mod dynamic_lib;
+
+use serialize::json::{Json, ToJson};
+
+#[derive(Clone, Copy, Debug, PartialEq, Hash, RustcEncodable, RustcDecodable)]
+pub enum PanicStrategy {
+    Unwind,
+    Abort,
+}
+
+impl PanicStrategy {
+    pub fn desc(&self) -> &str {
+        match *self {
+            PanicStrategy::Unwind => "unwind",
+            PanicStrategy::Abort => "abort",
+        }
+    }
+}
+
+impl ToJson for PanicStrategy {
+    fn to_json(&self) -> Json {
+        match *self {
+            PanicStrategy::Abort => "abort".to_json(),
+            PanicStrategy::Unwind => "unwind".to_json(),
+        }
+    }
+}

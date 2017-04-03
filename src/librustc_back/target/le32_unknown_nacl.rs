@@ -8,34 +8,34 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::{Target, TargetOptions};
+use super::{Target, TargetOptions, TargetResult};
 
-pub fn target() -> Target {
+pub fn target() -> TargetResult {
     let opts = TargetOptions {
         linker: "pnacl-clang".to_string(),
         ar: "pnacl-ar".to_string(),
 
-        pre_link_args: vec!("--pnacl-exceptions=sjlj".to_string(),
+        pre_link_args: vec!["--pnacl-exceptions=sjlj".to_string(),
                             "--target=le32-unknown-nacl".to_string(),
-                            "-Wl,--start-group".to_string()),
-        post_link_args: vec!("-Wl,--end-group".to_string()),
+                            "-Wl,--start-group".to_string()],
+        post_link_args: vec!["-Wl,--end-group".to_string()],
         dynamic_linking: false,
         executables: true,
         exe_suffix: ".pexe".to_string(),
-        no_compiler_rt: false,
         linker_is_gnu: true,
         allow_asm: false,
-        archive_format: "gnu".to_string(),
+        max_atomic_width: Some(32),
         .. Default::default()
     };
-    Target {
+    Ok(Target {
         llvm_target: "le32-unknown-nacl".to_string(),
         target_endian: "little".to_string(),
         target_pointer_width: "32".to_string(),
         target_os: "nacl".to_string(),
         target_env: "newlib".to_string(),
         target_vendor: "unknown".to_string(),
+        data_layout: "e-i64:64:64-p:32:32:32-v128:32:32".to_string(),
         arch: "le32".to_string(),
         options: opts,
-    }
+    })
 }

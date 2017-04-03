@@ -14,28 +14,24 @@
 //! unit-tested and separated from the Rust source and compiler data
 //! structures.
 
-use rustc::mir::repr::{BinOp, BorrowKind, Field, Literal, Mutability, UnOp, ItemKind};
-use rustc::middle::def_id::DefId;
+use rustc_const_math::ConstUsize;
+use rustc::mir::{BinOp, BorrowKind, Field, Literal, UnOp};
+use rustc::hir::def_id::DefId;
 use rustc::middle::region::CodeExtent;
-use rustc::middle::subst::Substs;
-use rustc::middle::ty::{AdtDef, ClosureSubsts, Region, Ty};
-use rustc_front::hir;
+use rustc::ty::subst::Substs;
+use rustc::ty::{self, AdtDef, ClosureSubsts, Region, Ty};
+use rustc::hir;
 use syntax::ast;
-use syntax::codemap::Span;
+use syntax_pos::Span;
 use self::cx::Cx;
 
 pub mod cx;
 
-#[derive(Clone, Debug)]
-pub struct ItemRef<'tcx> {
-    pub ty: Ty<'tcx>,
-    pub kind: ItemKind,
-    pub def_id: DefId,
-    pub substs: &'tcx Substs<'tcx>,
-}
+pub use rustc_const_eval::pattern::{BindingMode, Pattern, PatternKind, FieldPattern};
 
 #[derive(Clone, Debug)]
 pub struct Block<'tcx> {
+    pub targeted_by_break: bool,
     pub extent: CodeExtent,
     pub span: Span,
     pub stmts: Vec<StmtRef<'tcx>>,
@@ -76,40 +72,40 @@ pub enum StmtKind<'tcx> {
         pattern: Pattern<'tcx>,
 
         /// let pat = <INIT> ...
-        initializer: Option<ExprRef<'tcx>>,
-
-        /// let pat = init; <STMTS>
-        stmts: Vec<StmtRef<'tcx>>,
+        initializer: Option<ExprRef<'tcx>>
     },
 }
 
-// The Hair trait implementor translates their expressions (`&'tcx H::Expr`)
-// into instances of this `Expr` enum. This translation can be done
-// basically as lazilly or as eagerly as desired: every recursive
-// reference to an expression in this enum is an `ExprRef<'tcx>`, which
-// may in turn be another instance of this enum (boxed), or else an
-// untranslated `&'tcx H::Expr`. Note that instances of `Expr` are very
-// shortlived. They are created by `Hair::to_expr`, analyzed and
-// converted into MIR, and then discarded.
-//
-// If you compare `Expr` to the full compiler AST, you will see it is
-// a good bit simpler. In fact, a number of the more straight-forward
-// MIR simplifications are already done in the impl of `Hair`. For
-// example, method calls and overloaded operators are absent: they are
-// expected to be converted into `Expr::Call` instances.
+/// The Hair trait implementor translates their expressions (`&'tcx H::Expr`)
+/// into instances of this `Expr` enum. This translation can be done
+/// basically as lazilly or as eagerly as desired: every recursive
+/// reference to an expression in this enum is an `ExprRef<'tcx>`, which
+/// may in turn be another instance of this enum (boxed), or else an
+/// untranslated `&'tcx H::Expr`. Note that instances of `Expr` are very
+/// shortlived. They are created by `Hair::to_expr`, analyzed and
+/// converted into MIR, and then discarded.
+///
+/// If you compare `Expr` to the full compiler AST, you will see it is
+/// a good bit simpler. In fact, a number of the more straight-forward
+/// MIR simplifications are already done in the impl of `Hair`. For
+/// example, method calls and overloaded operators are absent: they are
+/// expected to be converted into `Expr::Call` instances.
 #[derive(Clone, Debug)]
 pub struct Expr<'tcx> {
-    // type of this expression
+    /// type of this expression
     pub ty: Ty<'tcx>,
 
-    // lifetime of this expression if it should be spilled into a
-    // temporary; should be None only if in a constant context
+    /// lifetime of this expression if it should be spilled into a
+    /// temporary; should be None only if in a constant context
     pub temp_lifetime: Option<CodeExtent>,
 
-    // span of the expression in the source
+    /// whether this temp lifetime was shrunk by #36082.
+    pub temp_lifetime_was_shrunk: bool,
+
+    /// span of the expression in the source
     pub span: Span,
 
-    // kind of expression
+    /// kind of expression
     pub kind: ExprKind<'tcx>,
 }
 
@@ -121,8 +117,10 @@ pub enum ExprKind<'tcx> {
     },
     Box {
         value: ExprRef<'tcx>,
+        value_extents: CodeExtent,
     },
     Call {
+        ty: ty::Ty<'tcx>,
         fun: ExprRef<'tcx>,
         args: Vec<ExprRef<'tcx>>,
     },
@@ -138,7 +136,8 @@ pub enum ExprKind<'tcx> {
         op: LogicalOp,
         lhs: ExprRef<'tcx>,
         rhs: ExprRef<'tcx>,
-    },
+    }, // NOT overloaded!
+       // LogicalOp is distinct from BinaryOp because of lazy evaluation of the operands.
     Unary {
         op: UnOp,
         arg: ExprRef<'tcx>,
@@ -146,7 +145,16 @@ pub enum ExprKind<'tcx> {
     Cast {
         source: ExprRef<'tcx>,
     },
+    Use {
+        source: ExprRef<'tcx>,
+    }, // Use a lexpr to get a vexpr.
+    NeverToAny {
+        source: ExprRef<'tcx>,
+    },
     ReifyFnPointer {
+        source: ExprRef<'tcx>,
+    },
+    ClosureFnPointer {
         source: ExprRef<'tcx>,
     },
     UnsafeFnPointer {
@@ -191,47 +199,46 @@ pub enum ExprKind<'tcx> {
     VarRef {
         id: ast::NodeId,
     },
-    SelfRef, // first argument, used for self in a closure
+    /// first argument, used for self in a closure
+    SelfRef,
     StaticRef {
         id: DefId,
     },
     Borrow {
-        region: Region,
+        region: &'tcx Region,
         borrow_kind: BorrowKind,
         arg: ExprRef<'tcx>,
     },
     Break {
-        label: Option<CodeExtent>,
+        label: CodeExtent,
+        value: Option<ExprRef<'tcx>>,
     },
     Continue {
-        label: Option<CodeExtent>,
+        label: CodeExtent,
     },
     Return {
         value: Option<ExprRef<'tcx>>,
     },
     Repeat {
         value: ExprRef<'tcx>,
-        // FIXME(#29789): Add a separate hair::Constant<'tcx> so this could be more explicit about
-        // its contained data. Currently this should only contain expression of ExprKind::Literal
-        // kind.
-        count: ExprRef<'tcx>,
+        count: ConstUsize,
     },
-    Vec {
+    Array {
         fields: Vec<ExprRef<'tcx>>,
     },
     Tuple {
         fields: Vec<ExprRef<'tcx>>,
     },
     Adt {
-        adt_def: AdtDef<'tcx>,
+        adt_def: &'tcx AdtDef,
         variant_index: usize,
         substs: &'tcx Substs<'tcx>,
         fields: Vec<FieldExprRef<'tcx>>,
-        base: Option<ExprRef<'tcx>>,
+        base: Option<FruInfo<'tcx>>
     },
     Closure {
         closure_id: DefId,
-        substs: &'tcx ClosureSubsts<'tcx>,
+        substs: ClosureSubsts<'tcx>,
         upvars: Vec<ExprRef<'tcx>>,
     },
     Literal {
@@ -239,6 +246,8 @@ pub enum ExprKind<'tcx> {
     },
     InlineAsm {
         asm: &'tcx hir::InlineAsm,
+        outputs: Vec<ExprRef<'tcx>>,
+        inputs: Vec<ExprRef<'tcx>>
     },
 }
 
@@ -255,89 +264,22 @@ pub struct FieldExprRef<'tcx> {
 }
 
 #[derive(Clone, Debug)]
+pub struct FruInfo<'tcx> {
+    pub base: ExprRef<'tcx>,
+    pub field_types: Vec<Ty<'tcx>>
+}
+
+#[derive(Clone, Debug)]
 pub struct Arm<'tcx> {
     pub patterns: Vec<Pattern<'tcx>>,
     pub guard: Option<ExprRef<'tcx>>,
     pub body: ExprRef<'tcx>,
 }
 
-#[derive(Clone, Debug)]
-pub struct Pattern<'tcx> {
-    pub ty: Ty<'tcx>,
-    pub span: Span,
-    pub kind: Box<PatternKind<'tcx>>,
-}
-
 #[derive(Copy, Clone, Debug)]
 pub enum LogicalOp {
     And,
     Or,
-}
-
-#[derive(Clone, Debug)]
-pub enum PatternKind<'tcx> {
-    Wild,
-
-    // x, ref x, x @ P, etc
-    Binding {
-        mutability: Mutability,
-        name: ast::Name,
-        mode: BindingMode,
-        var: ast::NodeId,
-        ty: Ty<'tcx>,
-        subpattern: Option<Pattern<'tcx>>,
-    },
-
-    // Foo(...) or Foo{...} or Foo, where `Foo` is a variant name from an adt with >1 variants
-    Variant {
-        adt_def: AdtDef<'tcx>,
-        variant_index: usize,
-        subpatterns: Vec<FieldPattern<'tcx>>,
-    },
-
-    // (...), Foo(...), Foo{...}, or Foo, where `Foo` is a variant name from an adt with 1 variant
-    Leaf {
-        subpatterns: Vec<FieldPattern<'tcx>>,
-    },
-
-    Deref {
-        subpattern: Pattern<'tcx>,
-    }, // box P, &P, &mut P, etc
-
-    Constant {
-        value: Literal<'tcx>,
-    },
-
-    Range {
-        lo: Literal<'tcx>,
-        hi: Literal<'tcx>,
-    },
-
-    // matches against a slice, checking the length and extracting elements
-    Slice {
-        prefix: Vec<Pattern<'tcx>>,
-        slice: Option<Pattern<'tcx>>,
-        suffix: Vec<Pattern<'tcx>>,
-    },
-
-    // fixed match against an array, irrefutable
-    Array {
-        prefix: Vec<Pattern<'tcx>>,
-        slice: Option<Pattern<'tcx>>,
-        suffix: Vec<Pattern<'tcx>>,
-    },
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum BindingMode {
-    ByValue,
-    ByRef(Region, BorrowKind),
-}
-
-#[derive(Clone, Debug)]
-pub struct FieldPattern<'tcx> {
-    pub field: Field,
-    pub pattern: Pattern<'tcx>,
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -358,13 +300,13 @@ pub struct FieldPattern<'tcx> {
 pub trait Mirror<'tcx> {
     type Output;
 
-    fn make_mirror<'a>(self, cx: &mut Cx<'a, 'tcx>) -> Self::Output;
+    fn make_mirror<'a, 'gcx>(self, cx: &mut Cx<'a, 'gcx, 'tcx>) -> Self::Output;
 }
 
 impl<'tcx> Mirror<'tcx> for Expr<'tcx> {
     type Output = Expr<'tcx>;
 
-    fn make_mirror<'a>(self, _: &mut Cx<'a, 'tcx>) -> Expr<'tcx> {
+    fn make_mirror<'a, 'gcx>(self, _: &mut Cx<'a, 'gcx, 'tcx>) -> Expr<'tcx> {
         self
     }
 }
@@ -372,7 +314,7 @@ impl<'tcx> Mirror<'tcx> for Expr<'tcx> {
 impl<'tcx> Mirror<'tcx> for ExprRef<'tcx> {
     type Output = Expr<'tcx>;
 
-    fn make_mirror<'a>(self, hir: &mut Cx<'a, 'tcx>) -> Expr<'tcx> {
+    fn make_mirror<'a, 'gcx>(self, hir: &mut Cx<'a, 'gcx, 'tcx>) -> Expr<'tcx> {
         match self {
             ExprRef::Hair(h) => h.make_mirror(hir),
             ExprRef::Mirror(m) => *m,
@@ -383,7 +325,7 @@ impl<'tcx> Mirror<'tcx> for ExprRef<'tcx> {
 impl<'tcx> Mirror<'tcx> for Stmt<'tcx> {
     type Output = Stmt<'tcx>;
 
-    fn make_mirror<'a>(self, _: &mut Cx<'a, 'tcx>) -> Stmt<'tcx> {
+    fn make_mirror<'a, 'gcx>(self, _: &mut Cx<'a, 'gcx, 'tcx>) -> Stmt<'tcx> {
         self
     }
 }
@@ -391,7 +333,7 @@ impl<'tcx> Mirror<'tcx> for Stmt<'tcx> {
 impl<'tcx> Mirror<'tcx> for StmtRef<'tcx> {
     type Output = Stmt<'tcx>;
 
-    fn make_mirror<'a>(self, _: &mut Cx<'a,'tcx>) -> Stmt<'tcx> {
+    fn make_mirror<'a, 'gcx>(self, _: &mut Cx<'a, 'gcx, 'tcx>) -> Stmt<'tcx> {
         match self {
             StmtRef::Mirror(m) => *m,
         }
@@ -401,7 +343,7 @@ impl<'tcx> Mirror<'tcx> for StmtRef<'tcx> {
 impl<'tcx> Mirror<'tcx> for Block<'tcx> {
     type Output = Block<'tcx>;
 
-    fn make_mirror<'a>(self, _: &mut Cx<'a, 'tcx>) -> Block<'tcx> {
+    fn make_mirror<'a, 'gcx>(self, _: &mut Cx<'a, 'gcx, 'tcx>) -> Block<'tcx> {
         self
     }
 }

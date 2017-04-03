@@ -10,14 +10,17 @@
 
 //! The Gamma and derived distributions.
 
+use core::fmt;
+
 use self::GammaRepr::*;
 use self::ChiSquaredRepr::*;
 
+#[cfg(not(test))] // only necessary for no_std
 use FloatMath;
 
-use {Rng, Open01};
+use {Open01, Rng};
 use super::normal::StandardNormal;
-use super::{IndependentSample, Sample, Exp};
+use super::{Exp, IndependentSample, Sample};
 
 /// The Gamma distribution `Gamma(shape, scale)` distribution.
 ///
@@ -41,6 +44,19 @@ use super::{IndependentSample, Sample, Exp};
 /// 363-372. DOI:[10.1145/358407.358414](http://doi.acm.org/10.1145/358407.358414)
 pub struct Gamma {
     repr: GammaRepr,
+}
+
+impl fmt::Debug for Gamma {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Gamma")
+         .field("repr",
+                &match self.repr {
+                    GammaRepr::Large(_) => "Large",
+                    GammaRepr::One(_) => "Exp",
+                    GammaRepr::Small(_) => "Small"
+                })
+          .finish()
+    }
 }
 
 enum GammaRepr {
@@ -181,6 +197,18 @@ pub struct ChiSquared {
     repr: ChiSquaredRepr,
 }
 
+impl fmt::Debug for ChiSquared {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ChiSquared")
+         .field("repr",
+                &match self.repr {
+                    ChiSquaredRepr::DoFExactlyOne => "DoFExactlyOne",
+                    ChiSquaredRepr::DoFAnythingElse(_) => "DoFAnythingElse",
+                })
+         .finish()
+    }
+}
+
 enum ChiSquaredRepr {
     // k == 1, Gamma(alpha, ..) is particularly slow for alpha < 1,
     // e.g. when alpha = 1/2 as it would be for this case, so special-
@@ -202,11 +230,13 @@ impl ChiSquared {
         ChiSquared { repr: repr }
     }
 }
+
 impl Sample<f64> for ChiSquared {
     fn sample<R: Rng>(&mut self, rng: &mut R) -> f64 {
         self.ind_sample(rng)
     }
 }
+
 impl IndependentSample<f64> for ChiSquared {
     fn ind_sample<R: Rng>(&self, rng: &mut R) -> f64 {
         match self.repr {
@@ -247,14 +277,26 @@ impl FisherF {
         }
     }
 }
+
 impl Sample<f64> for FisherF {
     fn sample<R: Rng>(&mut self, rng: &mut R) -> f64 {
         self.ind_sample(rng)
     }
 }
+
 impl IndependentSample<f64> for FisherF {
     fn ind_sample<R: Rng>(&self, rng: &mut R) -> f64 {
         self.numer.ind_sample(rng) / self.denom.ind_sample(rng) * self.dof_ratio
+    }
+}
+
+impl fmt::Debug for FisherF {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("FisherF")
+         .field("numer", &self.numer)
+         .field("denom", &self.denom)
+         .field("dof_ratio", &self.dof_ratio)
+         .finish()
     }
 }
 
@@ -276,11 +318,13 @@ impl StudentT {
         }
     }
 }
+
 impl Sample<f64> for StudentT {
     fn sample<R: Rng>(&mut self, rng: &mut R) -> f64 {
         self.ind_sample(rng)
     }
 }
+
 impl IndependentSample<f64> for StudentT {
     fn ind_sample<R: Rng>(&self, rng: &mut R) -> f64 {
         let StandardNormal(norm) = rng.gen::<StandardNormal>();
@@ -288,10 +332,19 @@ impl IndependentSample<f64> for StudentT {
     }
 }
 
+impl fmt::Debug for StudentT {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("StudentT")
+         .field("chi", &self.chi)
+         .field("dof", &self.dof)
+         .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use distributions::{Sample, IndependentSample};
-    use super::{ChiSquared, StudentT, FisherF};
+    use distributions::{IndependentSample, Sample};
+    use super::{ChiSquared, FisherF, StudentT};
 
     #[test]
     fn test_chi_squared_one() {

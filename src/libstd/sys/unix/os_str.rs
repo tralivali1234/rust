@@ -13,10 +13,9 @@
 
 use borrow::Cow;
 use fmt::{self, Debug};
-use vec::Vec;
 use str;
-use string::String;
 use mem;
+use sys_common::{AsInner, IntoInner};
 
 #[derive(Clone, Hash)]
 pub struct Buf {
@@ -39,9 +38,54 @@ impl Debug for Buf {
     }
 }
 
+impl IntoInner<Vec<u8>> for Buf {
+    fn into_inner(self) -> Vec<u8> {
+        self.inner
+    }
+}
+
+impl AsInner<[u8]> for Buf {
+    fn as_inner(&self) -> &[u8] {
+        &self.inner
+    }
+}
+
+
 impl Buf {
     pub fn from_string(s: String) -> Buf {
         Buf { inner: s.into_bytes() }
+    }
+
+    #[inline]
+    pub fn with_capacity(capacity: usize) -> Buf {
+        Buf {
+            inner: Vec::with_capacity(capacity)
+        }
+    }
+
+    #[inline]
+    pub fn clear(&mut self) {
+        self.inner.clear()
+    }
+
+    #[inline]
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+
+    #[inline]
+    pub fn reserve(&mut self, additional: usize) {
+        self.inner.reserve(additional)
+    }
+
+    #[inline]
+    pub fn reserve_exact(&mut self, additional: usize) {
+        self.inner.reserve_exact(additional)
+    }
+
+    #[inline]
+    pub fn shrink_to_fit(&mut self) {
+        self.inner.shrink_to_fit()
     }
 
     pub fn as_slice(&self) -> &Slice {
@@ -54,6 +98,17 @@ impl Buf {
 
     pub fn push_slice(&mut self, s: &Slice) {
         self.inner.extend_from_slice(&s.inner)
+    }
+
+    #[inline]
+    pub fn into_box(self) -> Box<Slice> {
+        unsafe { mem::transmute(self.inner.into_boxed_slice()) }
+    }
+
+    #[inline]
+    pub fn from_box(boxed: Box<Slice>) -> Buf {
+        let inner: Box<[u8]> = unsafe { mem::transmute(boxed) };
+        Buf { inner: inner.into_vec() }
     }
 }
 
@@ -76,5 +131,16 @@ impl Slice {
 
     pub fn to_owned(&self) -> Buf {
         Buf { inner: self.inner.to_vec() }
+    }
+
+    #[inline]
+    pub fn into_box(&self) -> Box<Slice> {
+        let boxed: Box<[u8]> = self.inner.into();
+        unsafe { mem::transmute(boxed) }
+    }
+
+    pub fn empty_box() -> Box<Slice> {
+        let boxed: Box<[u8]> = Default::default();
+        unsafe { mem::transmute(boxed) }
     }
 }

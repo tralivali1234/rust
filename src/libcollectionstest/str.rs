@@ -8,6 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use std::borrow::Cow;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::str::from_utf8;
 
@@ -122,8 +123,6 @@ macro_rules! test_concat {
 fn test_concat_for_different_types() {
     test_concat!("ab", vec![s("a"), s("b")]);
     test_concat!("ab", vec!["a", "b"]);
-    test_concat!("ab", vec!["a", "b"]);
-    test_concat!("ab", vec![s("a"), s("b")]);
 }
 
 #[test]
@@ -193,30 +192,44 @@ fn test_unsafe_slice() {
 
 #[test]
 fn test_starts_with() {
-    assert!(("".starts_with("")));
-    assert!(("abc".starts_with("")));
-    assert!(("abc".starts_with("a")));
-    assert!((!"a".starts_with("abc")));
-    assert!((!"".starts_with("abc")));
-    assert!((!"ödd".starts_with("-")));
-    assert!(("ödd".starts_with("öd")));
+    assert!("".starts_with(""));
+    assert!("abc".starts_with(""));
+    assert!("abc".starts_with("a"));
+    assert!(!"a".starts_with("abc"));
+    assert!(!"".starts_with("abc"));
+    assert!(!"ödd".starts_with("-"));
+    assert!("ödd".starts_with("öd"));
 }
 
 #[test]
 fn test_ends_with() {
-    assert!(("".ends_with("")));
-    assert!(("abc".ends_with("")));
-    assert!(("abc".ends_with("c")));
-    assert!((!"a".ends_with("abc")));
-    assert!((!"".ends_with("abc")));
-    assert!((!"ddö".ends_with("-")));
-    assert!(("ddö".ends_with("dö")));
+    assert!("".ends_with(""));
+    assert!("abc".ends_with(""));
+    assert!("abc".ends_with("c"));
+    assert!(!"a".ends_with("abc"));
+    assert!(!"".ends_with("abc"));
+    assert!(!"ddö".ends_with("-"));
+    assert!("ddö".ends_with("dö"));
 }
 
 #[test]
 fn test_is_empty() {
     assert!("".is_empty());
     assert!(!"a".is_empty());
+}
+
+#[test]
+fn test_replacen() {
+    assert_eq!("".replacen('a', "b", 5), "");
+    assert_eq!("acaaa".replacen("a", "b", 3), "bcbba");
+    assert_eq!("aaaa".replacen("a", "b", 0), "aaaa");
+
+    let test = "test";
+    assert_eq!(" test test ".replacen(test, "toast", 3), " toast toast ");
+    assert_eq!(" test test ".replacen(test, "toast", 0), " test test ");
+    assert_eq!(" test test ".replacen(test, "", 5), "   ");
+
+    assert_eq!("qwer123zxc789".replacen(char::is_numeric, "", 3), "qwerzxc789");
 }
 
 #[test]
@@ -267,6 +280,15 @@ fn test_replace_2d() {
 
     let d = "ไท华";
     assert_eq!(data.replace(d, repl), data);
+}
+
+#[test]
+fn test_replace_pattern() {
+    let data = "abcdαβγδabcdαβγδ";
+    assert_eq!(data.replace("dαβ", "😺😺😺"), "abc😺😺😺γδabc😺😺😺γδ");
+    assert_eq!(data.replace('γ', "😺😺😺"), "abcdαβ😺😺😺δabcdαβ😺😺😺δ");
+    assert_eq!(data.replace(&['a', 'γ'] as &[_], "😺😺😺"), "😺😺😺bcdαβ😺😺😺δ😺😺😺bcdαβ😺😺😺δ");
+    assert_eq!(data.replace(|c| c == 'γ', "😺😺😺"), "abcdαβ😺😺😺δabcdαβ😺😺😺δ");
 }
 
 #[test]
@@ -334,6 +356,54 @@ fn test_slice_2() {
 #[should_panic]
 fn test_slice_fail() {
     &"中华Việt Nam"[0..2];
+}
+
+
+#[test]
+fn test_is_char_boundary() {
+    let s = "ศไทย中华Việt Nam β-release 🐱123";
+    assert!(s.is_char_boundary(0));
+    assert!(s.is_char_boundary(s.len()));
+    assert!(!s.is_char_boundary(s.len() + 1));
+    for (i, ch) in s.char_indices() {
+        // ensure character locations are boundaries and continuation bytes are not
+        assert!(s.is_char_boundary(i), "{} is a char boundary in {:?}", i, s);
+        for j in 1..ch.len_utf8() {
+            assert!(!s.is_char_boundary(i + j),
+                    "{} should not be a char boundary in {:?}", i + j, s);
+        }
+    }
+}
+const LOREM_PARAGRAPH: &'static str = "\
+Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse quis lorem sit amet dolor \
+ultricies condimentum. Praesent iaculis purus elit, ac malesuada quam malesuada in. Duis sed orci \
+eros. Suspendisse sit amet magna mollis, mollis nunc luctus, imperdiet mi. Integer fringilla non \
+sem ut lacinia. Fusce varius tortor a risus porttitor hendrerit. Morbi mauris dui, ultricies nec \
+tempus vel, gravida nec quam.";
+
+// check the panic includes the prefix of the sliced string
+#[test]
+#[should_panic(expected="byte index 1024 is out of bounds of `Lorem ipsum dolor sit amet")]
+fn test_slice_fail_truncated_1() {
+    &LOREM_PARAGRAPH[..1024];
+}
+// check the truncation in the panic message
+#[test]
+#[should_panic(expected="luctus, im`[...]")]
+fn test_slice_fail_truncated_2() {
+    &LOREM_PARAGRAPH[..1024];
+}
+
+#[test]
+#[should_panic(expected="byte index 4 is not a char boundary; it is inside 'α' (bytes 3..5) of")]
+fn test_slice_fail_boundary_1() {
+    &"abcαβγ"[4..];
+}
+
+#[test]
+#[should_panic(expected="byte index 6 is not a char boundary; it is inside 'β' (bytes 5..7) of")]
+fn test_slice_fail_boundary_2() {
+    &"abcαβγ"[2..6];
 }
 
 #[test]
@@ -434,18 +504,6 @@ fn test_is_whitespace() {
 }
 
 #[test]
-fn test_slice_shift_char() {
-    let data = "ประเทศไทย中";
-    assert_eq!(data.slice_shift_char(), Some(('ป', "ระเทศไทย中")));
-}
-
-#[test]
-fn test_slice_shift_char_2() {
-    let empty = "";
-    assert_eq!(empty.slice_shift_char(), None);
-}
-
-#[test]
 fn test_is_utf8() {
     // deny overlong encodings
     assert!(from_utf8(&[0xc0, 0x80]).is_err());
@@ -471,68 +529,45 @@ fn test_is_utf8() {
 }
 
 #[test]
-fn test_is_utf16() {
-    use rustc_unicode::str::is_utf16;
-
-    macro_rules! pos {
-        ($($e:expr),*) => { { $(assert!(is_utf16($e));)* } }
+fn from_utf8_mostly_ascii() {
+    // deny invalid bytes embedded in long stretches of ascii
+    for i in 32..64 {
+        let mut data = [0; 128];
+        data[i] = 0xC0;
+        assert!(from_utf8(&data).is_err());
+        data[i] = 0xC2;
+        assert!(from_utf8(&data).is_err());
     }
+}
 
-    // non-surrogates
-    pos!(&[0x0000],
-         &[0x0001, 0x0002],
-         &[0xD7FF],
-         &[0xE000]);
-
-    // surrogate pairs (randomly generated with Python 3's
-    // .encode('utf-16be'))
-    pos!(&[0xdb54, 0xdf16, 0xd880, 0xdee0, 0xdb6a, 0xdd45],
-         &[0xd91f, 0xdeb1, 0xdb31, 0xdd84, 0xd8e2, 0xde14],
-         &[0xdb9f, 0xdc26, 0xdb6f, 0xde58, 0xd850, 0xdfae]);
-
-    // mixtures (also random)
-    pos!(&[0xd921, 0xdcc2, 0x002d, 0x004d, 0xdb32, 0xdf65],
-         &[0xdb45, 0xdd2d, 0x006a, 0xdacd, 0xddfe, 0x0006],
-         &[0x0067, 0xd8ff, 0xddb7, 0x000f, 0xd900, 0xdc80]);
-
-    // negative tests
-    macro_rules! neg {
-        ($($e:expr),*) => { { $(assert!(!is_utf16($e));)* } }
+#[test]
+fn from_utf8_error() {
+    macro_rules! test {
+        ($input: expr, $expected_valid_up_to: expr, $expected_error_len: expr) => {
+            let error = from_utf8($input).unwrap_err();
+            assert_eq!(error.valid_up_to(), $expected_valid_up_to);
+            assert_eq!(error.error_len(), $expected_error_len);
+        }
     }
-
-    neg!(
-        // surrogate + regular unit
-        &[0xdb45, 0x0000],
-        // surrogate + lead surrogate
-        &[0xd900, 0xd900],
-        // unterminated surrogate
-        &[0xd8ff],
-        // trail surrogate without a lead
-        &[0xddb7]);
-
-    // random byte sequences that Python 3's .decode('utf-16be')
-    // failed on
-    neg!(&[0x5b3d, 0x0141, 0xde9e, 0x8fdc, 0xc6e7],
-         &[0xdf5a, 0x82a5, 0x62b9, 0xb447, 0x92f3],
-         &[0xda4e, 0x42bc, 0x4462, 0xee98, 0xc2ca],
-         &[0xbe00, 0xb04a, 0x6ecb, 0xdd89, 0xe278],
-         &[0x0465, 0xab56, 0xdbb6, 0xa893, 0x665e],
-         &[0x6b7f, 0x0a19, 0x40f4, 0xa657, 0xdcc5],
-         &[0x9b50, 0xda5e, 0x24ec, 0x03ad, 0x6dee],
-         &[0x8d17, 0xcaa7, 0xf4ae, 0xdf6e, 0xbed7],
-         &[0xdaee, 0x2584, 0x7d30, 0xa626, 0x121a],
-         &[0xd956, 0x4b43, 0x7570, 0xccd6, 0x4f4a],
-         &[0x9dcf, 0x1b49, 0x4ba5, 0xfce9, 0xdffe],
-         &[0x6572, 0xce53, 0xb05a, 0xf6af, 0xdacf],
-         &[0x1b90, 0x728c, 0x9906, 0xdb68, 0xf46e],
-         &[0x1606, 0xbeca, 0xbe76, 0x860f, 0xdfa5],
-         &[0x8b4f, 0xde7a, 0xd220, 0x9fac, 0x2b6f],
-         &[0xb8fe, 0xebbe, 0xda32, 0x1a5f, 0x8b8b],
-         &[0x934b, 0x8956, 0xc434, 0x1881, 0xddf7],
-         &[0x5a95, 0x13fc, 0xf116, 0xd89b, 0x93f9],
-         &[0xd640, 0x71f1, 0xdd7d, 0x77eb, 0x1cd8],
-         &[0x348b, 0xaef0, 0xdb2c, 0xebf1, 0x1282],
-         &[0x50d7, 0xd824, 0x5010, 0xb369, 0x22ea]);
+    test!(b"A\xC3\xA9 \xFF ", 4, Some(1));
+    test!(b"A\xC3\xA9 \x80 ", 4, Some(1));
+    test!(b"A\xC3\xA9 \xC1 ", 4, Some(1));
+    test!(b"A\xC3\xA9 \xC1", 4, Some(1));
+    test!(b"A\xC3\xA9 \xC2", 4, None);
+    test!(b"A\xC3\xA9 \xC2 ", 4, Some(1));
+    test!(b"A\xC3\xA9 \xC2\xC0", 4, Some(1));
+    test!(b"A\xC3\xA9 \xE0", 4, None);
+    test!(b"A\xC3\xA9 \xE0\x9F", 4, Some(1));
+    test!(b"A\xC3\xA9 \xE0\xA0", 4, None);
+    test!(b"A\xC3\xA9 \xE0\xA0\xC0", 4, Some(2));
+    test!(b"A\xC3\xA9 \xE0\xA0 ", 4, Some(2));
+    test!(b"A\xC3\xA9 \xED\xA0\x80 ", 4, Some(1));
+    test!(b"A\xC3\xA9 \xF1", 4, None);
+    test!(b"A\xC3\xA9 \xF1\x80", 4, None);
+    test!(b"A\xC3\xA9 \xF1\x80\x80", 4, None);
+    test!(b"A\xC3\xA9 \xF1 ", 4, Some(1));
+    test!(b"A\xC3\xA9 \xF1\x80 ", 4, Some(2));
+    test!(b"A\xC3\xA9 \xF1\x80\x80 ", 4, Some(3));
 }
 
 #[test]
@@ -584,8 +619,6 @@ fn vec_str_conversions() {
     while i < n1 {
         let a: u8 = s1.as_bytes()[i];
         let b: u8 = s2.as_bytes()[i];
-        debug!("{}", a);
-        debug!("{}", b);
         assert_eq!(a, b);
         i += 1;
     }
@@ -614,28 +647,6 @@ fn test_contains_char() {
     assert!("a".contains('a'));
     assert!(!"abc".contains('d'));
     assert!(!"".contains('a'));
-}
-
-#[test]
-fn test_char_at() {
-    let s = "ศไทย中华Việt Nam";
-    let v = vec!['ศ','ไ','ท','ย','中','华','V','i','ệ','t',' ','N','a','m'];
-    let mut pos = 0;
-    for ch in &v {
-        assert!(s.char_at(pos) == *ch);
-        pos += ch.to_string().len();
-    }
-}
-
-#[test]
-fn test_char_at_reverse() {
-    let s = "ศไทย中华Việt Nam";
-    let v = vec!['ศ','ไ','ท','ย','中','华','V','i','ệ','t',' ','N','a','m'];
-    let mut pos = s.len();
-    for ch in v.iter().rev() {
-        assert!(s.char_at_reverse(pos) == *ch);
-        pos -= ch.to_string().len();
-    }
 }
 
 #[test]
@@ -684,15 +695,31 @@ fn test_escape_unicode() {
 }
 
 #[test]
+fn test_escape_debug() {
+    assert_eq!("abc".escape_debug(), "abc");
+    assert_eq!("a c".escape_debug(), "a c");
+    assert_eq!("éèê".escape_debug(), "éèê");
+    assert_eq!("\r\n\t".escape_debug(), "\\r\\n\\t");
+    assert_eq!("'\"\\".escape_debug(), "\\'\\\"\\\\");
+    assert_eq!("\u{7f}\u{ff}".escape_debug(), "\\u{7f}\u{ff}");
+    assert_eq!("\u{100}\u{ffff}".escape_debug(), "\u{100}\\u{ffff}");
+    assert_eq!("\u{10000}\u{10ffff}".escape_debug(), "\u{10000}\\u{10ffff}");
+    assert_eq!("ab\u{200b}".escape_debug(), "ab\\u{200b}");
+    assert_eq!("\u{10d4ea}\r".escape_debug(), "\\u{10d4ea}\\r");
+}
+
+#[test]
 fn test_escape_default() {
     assert_eq!("abc".escape_default(), "abc");
     assert_eq!("a c".escape_default(), "a c");
+    assert_eq!("éèê".escape_default(), "\\u{e9}\\u{e8}\\u{ea}");
     assert_eq!("\r\n\t".escape_default(), "\\r\\n\\t");
     assert_eq!("'\"\\".escape_default(), "\\'\\\"\\\\");
+    assert_eq!("\u{7f}\u{ff}".escape_default(), "\\u{7f}\\u{ff}");
     assert_eq!("\u{100}\u{ffff}".escape_default(), "\\u{100}\\u{ffff}");
     assert_eq!("\u{10000}\u{10ffff}".escape_default(), "\\u{10000}\\u{10ffff}");
-    assert_eq!("ab\u{fb00}".escape_default(), "ab\\u{fb00}");
-    assert_eq!("\u{1d4ea}\r".escape_default(), "\\u{1d4ea}\\r");
+    assert_eq!("ab\u{200b}".escape_default(), "ab\\u{200b}");
+    assert_eq!("\u{10d4ea}\r".escape_default(), "\\u{10d4ea}\\r");
 }
 
 #[test]
@@ -702,24 +729,6 @@ fn test_total_ord() {
     assert_eq!("1234".cmp("1234"), Equal);
     assert_eq!("12345555".cmp("123456"), Less);
     assert_eq!("22".cmp("1234"), Greater);
-}
-
-#[test]
-fn test_char_range_at() {
-    let data = "b¢€𤭢𤭢€¢b";
-    assert_eq!('b', data.char_range_at(0).ch);
-    assert_eq!('¢', data.char_range_at(1).ch);
-    assert_eq!('€', data.char_range_at(3).ch);
-    assert_eq!('𤭢', data.char_range_at(6).ch);
-    assert_eq!('𤭢', data.char_range_at(10).ch);
-    assert_eq!('€', data.char_range_at(14).ch);
-    assert_eq!('¢', data.char_range_at(17).ch);
-    assert_eq!('b', data.char_range_at(19).ch);
-}
-
-#[test]
-fn test_char_range_at_reverse_underflow() {
-    assert_eq!("abc".char_range_at_reverse(0).next, 0);
 }
 
 #[test]
@@ -735,6 +744,7 @@ fn test_iterator() {
         pos += 1;
     }
     assert_eq!(pos, v.len());
+    assert_eq!(s.chars().count(), v.len());
 }
 
 #[test]
@@ -756,8 +766,7 @@ fn test_rev_iterator() {
 fn test_chars_decoding() {
     let mut bytes = [0; 4];
     for c in (0..0x110000).filter_map(::std::char::from_u32) {
-        let len = c.encode_utf8(&mut bytes).unwrap_or(0);
-        let s = ::std::str::from_utf8(&bytes[..len]).unwrap();
+        let s = c.encode_utf8(&mut bytes);
         if Some(c) != s.chars().next() {
             panic!("character {:x}={} does not decode correctly", c as u32, c);
         }
@@ -768,8 +777,7 @@ fn test_chars_decoding() {
 fn test_chars_rev_decoding() {
     let mut bytes = [0; 4];
     for c in (0..0x110000).filter_map(::std::char::from_u32) {
-        let len = c.encode_utf8(&mut bytes).unwrap_or(0);
-        let s = ::std::str::from_utf8(&bytes[..len]).unwrap();
+        let s = c.encode_utf8(&mut bytes);
         if Some(c) != s.chars().rev().next() {
             panic!("character {:x}={} does not decode correctly", c as u32, c);
         }
@@ -782,6 +790,14 @@ fn test_iterator_clone() {
     let mut it = s.chars();
     it.next();
     assert!(it.clone().zip(it).all(|(x,y)| x == y));
+}
+
+#[test]
+fn test_iterator_last() {
+    let s = "ศไทย中华Việt Nam";
+    let mut it = s.chars();
+    it.next();
+    assert_eq!(it.last(), Some('m'));
 }
 
 #[test]
@@ -879,6 +895,14 @@ fn test_char_indices_revator() {
     }
     assert_eq!(pos, v.len());
     assert_eq!(pos, p.len());
+}
+
+#[test]
+fn test_char_indices_last() {
+    let s = "ศไทย中华Việt Nam";
+    let mut it = s.char_indices();
+    it.next();
+    assert_eq!(it.last(), Some((27, 'm')));
 }
 
 #[test]
@@ -1139,7 +1163,7 @@ fn test_rev_split_char_iterator_no_trailing() {
 
 #[test]
 fn test_utf16_code_units() {
-    use rustc_unicode::str::Utf16Encoder;
+    use std_unicode::str::Utf16Encoder;
     assert_eq!(Utf16Encoder::new(vec!['é', '\u{1F4A9}'].into_iter()).collect::<Vec<u16>>(),
                [0xE9, 0xD83D, 0xDCA9])
 }
@@ -1244,6 +1268,23 @@ fn test_box_slice_clone() {
     let data2 = data.clone().into_boxed_str().clone().into_string();
 
     assert_eq!(data, data2);
+}
+
+#[test]
+fn test_cow_from() {
+    let borrowed = "borrowed";
+    let owned = String::from("owned");
+    match (Cow::from(owned.clone()), Cow::from(borrowed)) {
+        (Cow::Owned(o), Cow::Borrowed(b)) => assert!(o == owned && b == borrowed),
+        _ => panic!("invalid `Cow::from`"),
+    }
+}
+
+#[test]
+fn test_repeat() {
+    assert_eq!("".repeat(3), "");
+    assert_eq!("abc".repeat(0), "");
+    assert_eq!("α".repeat(3), "ααα");
 }
 
 mod pattern {
@@ -1476,293 +1517,15 @@ generate_iterator_test! {
     with str::rsplitn;
 }
 
-mod bench {
-    use test::{Bencher, black_box};
+#[test]
+fn different_str_pattern_forwarding_lifetimes() {
+    use std::str::pattern::Pattern;
 
-    #[bench]
-    fn char_iterator(b: &mut Bencher) {
-        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-
-        b.iter(|| s.chars().count());
-    }
-
-    #[bench]
-    fn char_iterator_for(b: &mut Bencher) {
-        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-
-        b.iter(|| {
-            for ch in s.chars() { black_box(ch); }
-        });
-    }
-
-    #[bench]
-    fn char_iterator_ascii(b: &mut Bencher) {
-        let s = "Mary had a little lamb, Little lamb
-        Mary had a little lamb, Little lamb
-        Mary had a little lamb, Little lamb
-        Mary had a little lamb, Little lamb
-        Mary had a little lamb, Little lamb
-        Mary had a little lamb, Little lamb";
-
-        b.iter(|| s.chars().count());
-    }
-
-    #[bench]
-    fn char_iterator_rev(b: &mut Bencher) {
-        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-
-        b.iter(|| s.chars().rev().count());
-    }
-
-    #[bench]
-    fn char_iterator_rev_for(b: &mut Bencher) {
-        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-
-        b.iter(|| {
-            for ch in s.chars().rev() { black_box(ch); }
-        });
-    }
-
-    #[bench]
-    fn char_indicesator(b: &mut Bencher) {
-        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-        let len = s.chars().count();
-
-        b.iter(|| assert_eq!(s.char_indices().count(), len));
-    }
-
-    #[bench]
-    fn char_indicesator_rev(b: &mut Bencher) {
-        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-        let len = s.chars().count();
-
-        b.iter(|| assert_eq!(s.char_indices().rev().count(), len));
-    }
-
-    #[bench]
-    fn split_unicode_ascii(b: &mut Bencher) {
-        let s = "ประเทศไทย中华Việt Namประเทศไทย中华Việt Nam";
-
-        b.iter(|| assert_eq!(s.split('V').count(), 3));
-    }
-
-    #[bench]
-    fn split_ascii(b: &mut Bencher) {
-        let s = "Mary had a little lamb, Little lamb, little-lamb.";
-        let len = s.split(' ').count();
-
-        b.iter(|| assert_eq!(s.split(' ').count(), len));
-    }
-
-    #[bench]
-    fn split_extern_fn(b: &mut Bencher) {
-        let s = "Mary had a little lamb, Little lamb, little-lamb.";
-        let len = s.split(' ').count();
-        fn pred(c: char) -> bool { c == ' ' }
-
-        b.iter(|| assert_eq!(s.split(pred).count(), len));
-    }
-
-    #[bench]
-    fn split_closure(b: &mut Bencher) {
-        let s = "Mary had a little lamb, Little lamb, little-lamb.";
-        let len = s.split(' ').count();
-
-        b.iter(|| assert_eq!(s.split(|c: char| c == ' ').count(), len));
-    }
-
-    #[bench]
-    fn split_slice(b: &mut Bencher) {
-        let s = "Mary had a little lamb, Little lamb, little-lamb.";
-        let len = s.split(' ').count();
-
-        let c: &[char] = &[' '];
-        b.iter(|| assert_eq!(s.split(c).count(), len));
-    }
-
-    #[bench]
-    fn bench_join(b: &mut Bencher) {
-        let s = "ศไทย中华Việt Nam; Mary had a little lamb, Little lamb";
-        let sep = "→";
-        let v = vec![s, s, s, s, s, s, s, s, s, s];
-        b.iter(|| {
-            assert_eq!(v.join(sep).len(), s.len() * 10 + sep.len() * 9);
-        })
-    }
-
-    #[bench]
-    fn bench_contains_short_short(b: &mut Bencher) {
-        let haystack = "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
-        let needle = "sit";
-
-        b.iter(|| {
-            assert!(haystack.contains(needle));
-        })
-    }
-
-    #[bench]
-    fn bench_contains_short_long(b: &mut Bencher) {
-        let haystack = "\
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse quis lorem sit amet dolor \
-ultricies condimentum. Praesent iaculis purus elit, ac malesuada quam malesuada in. Duis sed orci \
-eros. Suspendisse sit amet magna mollis, mollis nunc luctus, imperdiet mi. Integer fringilla non \
-sem ut lacinia. Fusce varius tortor a risus porttitor hendrerit. Morbi mauris dui, ultricies nec \
-tempus vel, gravida nec quam.
-
-In est dui, tincidunt sed tempus interdum, adipiscing laoreet ante. Etiam tempor, tellus quis \
-sagittis interdum, nulla purus mattis sem, quis auctor erat odio ac tellus. In nec nunc sit amet \
-diam volutpat molestie at sed ipsum. Vestibulum laoreet consequat vulputate. Integer accumsan \
-lorem ac dignissim placerat. Suspendisse convallis faucibus lorem. Aliquam erat volutpat. In vel \
-eleifend felis. Sed suscipit nulla lorem, sed mollis est sollicitudin et. Nam fermentum egestas \
-interdum. Curabitur ut nisi justo.
-
-Sed sollicitudin ipsum tellus, ut condimentum leo eleifend nec. Cras ut velit ante. Phasellus nec \
-mollis odio. Mauris molestie erat in arcu mattis, at aliquet dolor vehicula. Quisque malesuada \
-lectus sit amet nisi pretium, a condimentum ipsum porta. Morbi at dapibus diam. Praesent egestas \
-est sed risus elementum, eu rutrum metus ultrices. Etiam fermentum consectetur magna, id rutrum \
-felis accumsan a. Aliquam ut pellentesque libero. Sed mi nulla, lobortis eu tortor id, suscipit \
-ultricies neque. Morbi iaculis sit amet risus at iaculis. Praesent eget ligula quis turpis \
-feugiat suscipit vel non arcu. Interdum et malesuada fames ac ante ipsum primis in faucibus. \
-Aliquam sit amet placerat lorem.
-
-Cras a lacus vel ante posuere elementum. Nunc est leo, bibendum ut facilisis vel, bibendum at \
-mauris. Nullam adipiscing diam vel odio ornare, luctus adipiscing mi luctus. Nulla facilisi. \
-Mauris adipiscing bibendum neque, quis adipiscing lectus tempus et. Sed feugiat erat et nisl \
-lobortis pharetra. Donec vitae erat enim. Nullam sit amet felis et quam lacinia tincidunt. Aliquam \
-suscipit dapibus urna. Sed volutpat urna in magna pulvinar volutpat. Phasellus nec tellus ac diam \
-cursus accumsan.
-
-Nam lectus enim, dapibus non nisi tempor, consectetur convallis massa. Maecenas eleifend dictum \
-feugiat. Etiam quis mauris vel risus luctus mattis a a nunc. Nullam orci quam, imperdiet id \
-vehicula in, porttitor ut nibh. Duis sagittis adipiscing nisl vitae congue. Donec mollis risus eu \
-leo suscipit, varius porttitor nulla porta. Pellentesque ut sem nec nisi euismod vehicula. Nulla \
-malesuada sollicitudin quam eu fermentum.";
-        let needle = "english";
-
-        b.iter(|| {
-            assert!(!haystack.contains(needle));
-        })
-    }
-
-    #[bench]
-    fn bench_contains_bad_naive(b: &mut Bencher) {
-        let haystack = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-        let needle = "aaaaaaaab";
-
-        b.iter(|| {
-            assert!(!haystack.contains(needle));
-        })
-    }
-
-    #[bench]
-    fn bench_contains_equal(b: &mut Bencher) {
-        let haystack = "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
-        let needle = "Lorem ipsum dolor sit amet, consectetur adipiscing elit.";
-
-        b.iter(|| {
-            assert!(haystack.contains(needle));
-        })
-    }
-
-    macro_rules! make_test_inner {
-        ($s:ident, $code:expr, $name:ident, $str:expr) => {
-            #[bench]
-            fn $name(bencher: &mut Bencher) {
-                let mut $s = $str;
-                black_box(&mut $s);
-                bencher.iter(|| $code);
-            }
+    fn foo<'a, P>(p: P) where for<'b> &'b P: Pattern<'a> {
+        for _ in 0..3 {
+            "asdf".find(&p);
         }
     }
 
-    macro_rules! make_test {
-        ($name:ident, $s:ident, $code:expr) => {
-            mod $name {
-                use test::Bencher;
-                use test::black_box;
-
-                // Short strings: 65 bytes each
-                make_test_inner!($s, $code, short_ascii,
-                    "Mary had a little lamb, Little lamb Mary had a littl lamb, lamb!");
-                make_test_inner!($s, $code, short_mixed,
-                    "ศไทย中华Việt Nam; Mary had a little lamb, Little lam!");
-                make_test_inner!($s, $code, short_pile_of_poo,
-                    "💩💩💩💩💩💩💩💩💩💩💩💩💩💩💩💩!");
-                make_test_inner!($s, $code, long_lorem_ipsum,"\
-Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse quis lorem sit amet dolor \
-ultricies condimentum. Praesent iaculis purus elit, ac malesuada quam malesuada in. Duis sed orci \
-eros. Suspendisse sit amet magna mollis, mollis nunc luctus, imperdiet mi. Integer fringilla non \
-sem ut lacinia. Fusce varius tortor a risus porttitor hendrerit. Morbi mauris dui, ultricies nec \
-tempus vel, gravida nec quam.
-
-In est dui, tincidunt sed tempus interdum, adipiscing laoreet ante. Etiam tempor, tellus quis \
-sagittis interdum, nulla purus mattis sem, quis auctor erat odio ac tellus. In nec nunc sit amet \
-diam volutpat molestie at sed ipsum. Vestibulum laoreet consequat vulputate. Integer accumsan \
-lorem ac dignissim placerat. Suspendisse convallis faucibus lorem. Aliquam erat volutpat. In vel \
-eleifend felis. Sed suscipit nulla lorem, sed mollis est sollicitudin et. Nam fermentum egestas \
-interdum. Curabitur ut nisi justo.
-
-Sed sollicitudin ipsum tellus, ut condimentum leo eleifend nec. Cras ut velit ante. Phasellus nec \
-mollis odio. Mauris molestie erat in arcu mattis, at aliquet dolor vehicula. Quisque malesuada \
-lectus sit amet nisi pretium, a condimentum ipsum porta. Morbi at dapibus diam. Praesent egestas \
-est sed risus elementum, eu rutrum metus ultrices. Etiam fermentum consectetur magna, id rutrum \
-felis accumsan a. Aliquam ut pellentesque libero. Sed mi nulla, lobortis eu tortor id, suscipit \
-ultricies neque. Morbi iaculis sit amet risus at iaculis. Praesent eget ligula quis turpis \
-feugiat suscipit vel non arcu. Interdum et malesuada fames ac ante ipsum primis in faucibus. \
-Aliquam sit amet placerat lorem.
-
-Cras a lacus vel ante posuere elementum. Nunc est leo, bibendum ut facilisis vel, bibendum at \
-mauris. Nullam adipiscing diam vel odio ornare, luctus adipiscing mi luctus. Nulla facilisi. \
-Mauris adipiscing bibendum neque, quis adipiscing lectus tempus et. Sed feugiat erat et nisl \
-lobortis pharetra. Donec vitae erat enim. Nullam sit amet felis et quam lacinia tincidunt. Aliquam \
-suscipit dapibus urna. Sed volutpat urna in magna pulvinar volutpat. Phasellus nec tellus ac diam \
-cursus accumsan.
-
-Nam lectus enim, dapibus non nisi tempor, consectetur convallis massa. Maecenas eleifend dictum \
-feugiat. Etiam quis mauris vel risus luctus mattis a a nunc. Nullam orci quam, imperdiet id \
-vehicula in, porttitor ut nibh. Duis sagittis adipiscing nisl vitae congue. Donec mollis risus eu \
-leo suscipit, varius porttitor nulla porta. Pellentesque ut sem nec nisi euismod vehicula. Nulla \
-malesuada sollicitudin quam eu fermentum!");
-            }
-        }
-    }
-
-    make_test!(chars_count, s, s.chars().count());
-
-    make_test!(contains_bang_str, s, s.contains("!"));
-    make_test!(contains_bang_char, s, s.contains('!'));
-
-    make_test!(match_indices_a_str, s, s.match_indices("a").count());
-
-    make_test!(split_a_str, s, s.split("a").count());
-
-    make_test!(trim_ascii_char, s, {
-        use std::ascii::AsciiExt;
-        s.trim_matches(|c: char| c.is_ascii())
-    });
-    make_test!(trim_left_ascii_char, s, {
-        use std::ascii::AsciiExt;
-        s.trim_left_matches(|c: char| c.is_ascii())
-    });
-    make_test!(trim_right_ascii_char, s, {
-        use std::ascii::AsciiExt;
-        s.trim_right_matches(|c: char| c.is_ascii())
-    });
-
-    make_test!(find_underscore_char, s, s.find('_'));
-    make_test!(rfind_underscore_char, s, s.rfind('_'));
-    make_test!(find_underscore_str, s, s.find("_"));
-
-    make_test!(find_zzz_char, s, s.find('\u{1F4A4}'));
-    make_test!(rfind_zzz_char, s, s.rfind('\u{1F4A4}'));
-    make_test!(find_zzz_str, s, s.find("\u{1F4A4}"));
-
-    make_test!(split_space_char, s, s.split(' ').count());
-    make_test!(split_terminator_space_char, s, s.split_terminator(' ').count());
-
-    make_test!(splitn_space_char, s, s.splitn(10, ' ').count());
-    make_test!(rsplitn_space_char, s, s.rsplitn(10, ' ').count());
-
-    make_test!(split_space_str, s, s.split(" ").count());
-    make_test!(split_ad_str, s, s.split("ad").count());
+    foo::<&str>("x");
 }

@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// ignore-emscripten no threads support
+
 #![feature(box_syntax, set_stdio)]
 
 use std::io::prelude::*;
@@ -28,7 +30,7 @@ fn main() {
     let data = Arc::new(Mutex::new(Vec::new()));
     let sink = Sink(data.clone());
     let res = thread::Builder::new().spawn(move|| -> () {
-        io::set_panic(Box::new(sink));
+        io::set_panic(Some(Box::new(sink)));
         panic!("Hello, world!")
     }).unwrap().join();
     assert!(res.is_err());

@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// error-pattern:type annotations required
+// error-pattern:type annotations needed
 fn main() {
     panic!(
         std::default::Default::default()

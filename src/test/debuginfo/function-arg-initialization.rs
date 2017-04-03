@@ -8,6 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// ignore-tidy-linelength
+
 // min-lldb-version: 310
 
 // This test case checks if function arguments already have the correct value
@@ -34,9 +36,11 @@
 
 // NON IMMEDIATE ARGS
 // gdb-command:print a
-// gdb-check:$4 = {a = 3, b = 4, c = 5, d = 6, e = 7, f = 8, g = 9, h = 10}
+// gdbg-check:$4 = {a = 3, b = 4, c = 5, d = 6, e = 7, f = 8, g = 9, h = 10}
+// gdbt-check:$4 = function_arg_initialization::BigStruct {a: 3, b: 4, c: 5, d: 6, e: 7, f: 8, g: 9, h: 10}
 // gdb-command:print b
-// gdb-check:$5 = {a = 11, b = 12, c = 13, d = 14, e = 15, f = 16, g = 17, h = 18}
+// gdbg-check:$5 = {a = 11, b = 12, c = 13, d = 14, e = 15, f = 16, g = 17, h = 18}
+// gdbt-check:$5 = function_arg_initialization::BigStruct {a: 11, b: 12, c: 13, d: 14, e: 15, f: 16, g: 17, h: 18}
 // gdb-command:continue
 
 // BINDING
@@ -228,7 +232,7 @@
 #![omit_gdb_pretty_printer_section]
 
 fn immediate_args(a: isize, b: bool, c: f64) {
-    println!("") // #break
+    zzz(); // #break
 }
 
 struct BigStruct {
@@ -243,7 +247,7 @@ struct BigStruct {
 }
 
 fn non_immediate_args(a: BigStruct, b: BigStruct) {
-    println!("") // #break
+    zzz(); // #break
 }
 
 fn binding(a: i64, b: u64, c: f64) {
@@ -257,7 +261,7 @@ fn assignment(mut a: u64, b: u64, c: f64) {
 }
 
 fn function_call(x: u64, y: u64, z: f64) {
-    println!("Hi!") // #break
+    zzz(); // #break
 }
 
 fn identifier(x: u64, y: u64, z: f64) -> u64 {
@@ -288,8 +292,8 @@ fn while_expr(mut x: u64, y: u64, z: u64) -> u64 {
 }
 
 fn loop_expr(mut x: u64, y: u64, z: u64) -> u64 {
-    loop { // #break
-        x += z;
+    loop {
+        x += z; // #break
 
         if x + y > 1000 {
             return x;
@@ -333,3 +337,5 @@ fn main() {
     while_expr(40, 41, 42);
     loop_expr(43, 44, 45);
 }
+
+fn zzz() {()}

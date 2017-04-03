@@ -12,9 +12,8 @@ mod a {
     struct A;
 
     impl Default for A {
-        pub fn default() -> A {
-            //~^ ERROR E0449
-            A;
+        pub fn default() -> A { //~ ERROR unnecessary visibility qualifier
+            A
         }
     }
 }
@@ -22,5 +21,5 @@ mod a {
 
 fn main() {
     a::A::default();
-    //~^ ERROR method `default` is inaccessible
+    //~^ ERROR struct `A` is private
  }

@@ -16,7 +16,7 @@ fn main() {
     g = f;
     f = box g;
     //~^  ERROR mismatched types
-    //~| expected `_`
-    //~| found `Box<_>`
+    //~| expected type `_`
+    //~| found type `std::boxed::Box<_>`
     //~| cyclic type of infinite size
 }

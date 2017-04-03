@@ -8,33 +8,35 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![allow(missing_docs)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
+#![allow(missing_docs, bad_style)]
 
-use prelude::v1::*;
-
+use ptr;
 use ffi::{OsStr, OsString};
 use io::{self, ErrorKind};
-use num::Zero;
 use os::windows::ffi::{OsStrExt, OsStringExt};
 use path::PathBuf;
 use time::Duration;
 
 #[macro_use] pub mod compat;
 
+pub mod args;
 pub mod backtrace;
 pub mod c;
 pub mod condvar;
+pub mod dynamic_lib;
+pub mod env;
 pub mod ext;
 pub mod fs;
 pub mod handle;
+pub mod memchr;
 pub mod mutex;
 pub mod net;
 pub mod os;
 pub mod os_str;
+pub mod path;
 pub mod pipe;
 pub mod process;
+pub mod rand;
 pub mod rwlock;
 pub mod stack_overflow;
 pub mod thread;
@@ -42,12 +44,33 @@ pub mod thread_local;
 pub mod time;
 pub mod stdio;
 
-pub fn init() {}
+#[cfg(not(test))]
+pub fn init() {
+    ::alloc::oom::set_oom_handler(oom_handler);
+
+    // See comment in sys/unix/mod.rs
+    fn oom_handler() -> ! {
+        use intrinsics;
+        use ptr;
+        let msg = "fatal runtime error: out of memory\n";
+        unsafe {
+            // WriteFile silently fails if it is passed an invalid handle, so
+            // there is no need to check the result of GetStdHandle.
+            c::WriteFile(c::GetStdHandle(c::STD_ERROR_HANDLE),
+                         msg.as_ptr() as c::LPVOID,
+                         msg.len() as c::DWORD,
+                         ptr::null_mut(),
+                         ptr::null_mut());
+            intrinsics::abort();
+        }
+    }
+}
 
 pub fn decode_error_kind(errno: i32) -> ErrorKind {
     match errno as c::DWORD {
         c::ERROR_ACCESS_DENIED => return ErrorKind::PermissionDenied,
         c::ERROR_ALREADY_EXISTS => return ErrorKind::AlreadyExists,
+        c::ERROR_FILE_EXISTS => return ErrorKind::AlreadyExists,
         c::ERROR_BROKEN_PIPE => return ErrorKind::BrokenPipe,
         c::ERROR_FILE_NOT_FOUND => return ErrorKind::NotFound,
         c::ERROR_PATH_NOT_FOUND => return ErrorKind::NotFound,
@@ -149,6 +172,52 @@ fn os2path(s: &[u16]) -> PathBuf {
     PathBuf::from(OsString::from_wide(s))
 }
 
+#[allow(dead_code)] // Only used in backtrace::gnu::get_executable_filename()
+fn wide_char_to_multi_byte(code_page: u32,
+                           flags: u32,
+                           s: &[u16],
+                           no_default_char: bool)
+                           -> io::Result<Vec<i8>> {
+    unsafe {
+        let mut size = c::WideCharToMultiByte(code_page,
+                                              flags,
+                                              s.as_ptr(),
+                                              s.len() as i32,
+                                              ptr::null_mut(),
+                                              0,
+                                              ptr::null(),
+                                              ptr::null_mut());
+        if size == 0 {
+            return Err(io::Error::last_os_error());
+        }
+
+        let mut buf = Vec::with_capacity(size as usize);
+        buf.set_len(size as usize);
+
+        let mut used_default_char = c::FALSE;
+        size = c::WideCharToMultiByte(code_page,
+                                      flags,
+                                      s.as_ptr(),
+                                      s.len() as i32,
+                                      buf.as_mut_ptr(),
+                                      buf.len() as i32,
+                                      ptr::null(),
+                                      if no_default_char { &mut used_default_char }
+                                      else { ptr::null_mut() });
+        if size == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if no_default_char && used_default_char == c::TRUE {
+            return Err(io::Error::new(io::ErrorKind::InvalidData,
+                                      "string cannot be converted to requested code page"));
+        }
+
+        buf.set_len(size as usize);
+
+        Ok(buf)
+    }
+}
+
 pub fn truncate_utf16_at_nul<'a>(v: &'a [u16]) -> &'a [u16] {
     match v.iter().position(|c| *c == 0) {
         // don't include the 0
@@ -157,15 +226,29 @@ pub fn truncate_utf16_at_nul<'a>(v: &'a [u16]) -> &'a [u16] {
     }
 }
 
-fn cvt<I: PartialEq + Zero>(i: I) -> io::Result<I> {
-    if i == I::zero() {
+pub trait IsZero {
+    fn is_zero(&self) -> bool;
+}
+
+macro_rules! impl_is_zero {
+    ($($t:ident)*) => ($(impl IsZero for $t {
+        fn is_zero(&self) -> bool {
+            *self == 0
+        }
+    })*)
+}
+
+impl_is_zero! { i8 i16 i32 i64 isize u8 u16 u32 u64 usize }
+
+pub fn cvt<I: IsZero>(i: I) -> io::Result<I> {
+    if i.is_zero() {
         Err(io::Error::last_os_error())
     } else {
         Ok(i)
     }
 }
 
-fn dur2timeout(dur: Duration) -> c::DWORD {
+pub fn dur2timeout(dur: Duration) -> c::DWORD {
     // Note that a duration is a (u64, u32) (seconds, nanoseconds) pair, and the
     // timeouts in windows APIs are typically u32 milliseconds. To translate, we
     // have two pieces to take care of:
@@ -184,4 +267,18 @@ fn dur2timeout(dur: Duration) -> c::DWORD {
             ms as c::DWORD
         }
     }).unwrap_or(c::INFINITE)
+}
+
+// On Windows, use the processor-specific __fastfail mechanism.  In Windows 8
+// and later, this will terminate the process immediately without running any
+// in-process exception handlers.  In earlier versions of Windows, this
+// sequence of instructions will be treated as an access violation,
+// terminating the process but without necessarily bypassing all exception
+// handlers.
+//
+// https://msdn.microsoft.com/en-us/library/dn774154.aspx
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub unsafe fn abort_internal() -> ! {
+    asm!("int $$0x29" :: "{ecx}"(7) ::: volatile); // 7 is FAST_FAIL_FATAL_APP_EXIT
+    ::intrinsics::unreachable();
 }

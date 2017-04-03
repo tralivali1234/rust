@@ -15,7 +15,6 @@ enum Bar<T> { What } //~ ERROR parameter `T` is never used
 fn foo<T>() {
     static a: Bar<T> = Bar::What;
     //~^ ERROR cannot use an outer type parameter in this context
-    //~| ERROR use of undeclared type name `T`
 }
 
 fn main() {

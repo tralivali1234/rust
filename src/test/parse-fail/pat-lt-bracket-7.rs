@@ -9,5 +9,5 @@
 // except according to those terms.
 
 fn main() {
-    for thing(x[]) {} //~ error: expected one of `,` or `@`, found `[`
+    for thing(x[]) in foo {} //~ ERROR: expected one of `)`, `,`, or `@`, found `[`
 }

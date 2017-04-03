@@ -8,10 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// error-pattern:declaration of `None` shadows
 use std::option::*;
 
 fn main() {
-  let None: isize = 42;
+  let None: isize = 42; //~ ERROR let bindings cannot shadow unit variants
   log(debug, None);
+  //~^ ERROR cannot find function `log` in this scope
+  //~| ERROR cannot find value `debug` in this scope
 }

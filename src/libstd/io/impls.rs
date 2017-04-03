@@ -8,13 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use boxed::Box;
 use cmp;
 use io::{self, SeekFrom, Read, Write, Seek, BufRead, Error, ErrorKind};
 use fmt;
 use mem;
-use string::String;
-use vec::Vec;
 
 // =============================================================================
 // Forwarding implementations
@@ -150,13 +147,26 @@ impl<B: BufRead + ?Sized> BufRead for Box<B> {
 // =============================================================================
 // In-memory buffer implementations
 
+/// Read is implemented for `&[u8]` by copying from the slice.
+///
+/// Note that reading updates the slice to point to the yet unread part.
+/// The slice will be empty when EOF is reached.
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> Read for &'a [u8] {
     #[inline]
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let amt = cmp::min(buf.len(), self.len());
         let (a, b) = self.split_at(amt);
-        buf.clone_from_slice(a);
+
+        // First check if the amount of bytes we want to read is small:
+        // `copy_from_slice` will generally expand to a call to `memcpy`, and
+        // for a single byte the overhead is significant.
+        if amt == 1 {
+            buf[0] = a[0];
+        } else {
+            buf[..amt].copy_from_slice(a);
+        }
+
         *self = b;
         Ok(amt)
     }
@@ -168,7 +178,16 @@ impl<'a> Read for &'a [u8] {
                                   "failed to fill whole buffer"));
         }
         let (a, b) = self.split_at(buf.len());
-        buf.clone_from_slice(a);
+
+        // First check if the amount of bytes we want to read is small:
+        // `copy_from_slice` will generally expand to a call to `memcpy`, and
+        // for a single byte the overhead is significant.
+        if buf.len() == 1 {
+            buf[0] = a[0];
+        } else {
+            buf.copy_from_slice(a);
+        }
+
         *self = b;
         Ok(())
     }
@@ -183,20 +202,25 @@ impl<'a> BufRead for &'a [u8] {
     fn consume(&mut self, amt: usize) { *self = &self[amt..]; }
 }
 
+/// Write is implemented for `&mut [u8]` by copying into the slice, overwriting
+/// its data.
+///
+/// Note that writing updates the slice to point to the yet unwritten part.
+/// The slice will be empty when it has been completely overwritten.
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a> Write for &'a mut [u8] {
     #[inline]
     fn write(&mut self, data: &[u8]) -> io::Result<usize> {
         let amt = cmp::min(data.len(), self.len());
         let (a, b) = mem::replace(self, &mut []).split_at_mut(amt);
-        a.clone_from_slice(&data[..amt]);
+        a.copy_from_slice(&data[..amt]);
         *self = b;
         Ok(amt)
     }
 
     #[inline]
     fn write_all(&mut self, data: &[u8]) -> io::Result<()> {
-        if try!(self.write(data)) == data.len() {
+        if self.write(data)? == data.len() {
             Ok(())
         } else {
             Err(Error::new(ErrorKind::WriteZero, "failed to write whole buffer"))
@@ -207,6 +231,8 @@ impl<'a> Write for &'a mut [u8] {
     fn flush(&mut self) -> io::Result<()> { Ok(()) }
 }
 
+/// Write is implemented for `Vec<u8>` by appending to the vector.
+/// The vector will grow as needed.
 #[stable(feature = "rust1", since = "1.0.0")]
 impl Write for Vec<u8> {
     #[inline]
@@ -228,7 +254,6 @@ impl Write for Vec<u8> {
 #[cfg(test)]
 mod tests {
     use io::prelude::*;
-    use vec::Vec;
     use test;
 
     #[bench]

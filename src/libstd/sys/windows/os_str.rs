@@ -14,14 +14,24 @@
 use borrow::Cow;
 use fmt::{self, Debug};
 use sys_common::wtf8::{Wtf8, Wtf8Buf};
-use string::String;
-use result::Result;
-use option::Option;
 use mem;
+use sys_common::{AsInner, IntoInner};
 
 #[derive(Clone, Hash)]
 pub struct Buf {
     pub inner: Wtf8Buf
+}
+
+impl IntoInner<Wtf8Buf> for Buf {
+    fn into_inner(self) -> Wtf8Buf {
+        self.inner
+    }
+}
+
+impl AsInner<Wtf8> for Buf {
+    fn as_inner(&self) -> &Wtf8 {
+        &self.inner
+    }
 }
 
 impl Debug for Buf {
@@ -41,6 +51,20 @@ impl Debug for Slice {
 }
 
 impl Buf {
+    pub fn with_capacity(capacity: usize) -> Buf {
+        Buf {
+            inner: Wtf8Buf::with_capacity(capacity)
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.inner.clear()
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+
     pub fn from_string(s: String) -> Buf {
         Buf { inner: Wtf8Buf::from_string(s) }
     }
@@ -55,6 +79,29 @@ impl Buf {
 
     pub fn push_slice(&mut self, s: &Slice) {
         self.inner.push_wtf8(&s.inner)
+    }
+
+    pub fn reserve(&mut self, additional: usize) {
+        self.inner.reserve(additional)
+    }
+
+    pub fn reserve_exact(&mut self, additional: usize) {
+        self.inner.reserve_exact(additional)
+    }
+
+    pub fn shrink_to_fit(&mut self) {
+        self.inner.shrink_to_fit()
+    }
+
+    #[inline]
+    pub fn into_box(self) -> Box<Slice> {
+        unsafe { mem::transmute(self.inner.into_box()) }
+    }
+
+    #[inline]
+    pub fn from_box(boxed: Box<Slice>) -> Buf {
+        let inner: Box<Wtf8> = unsafe { mem::transmute(boxed) };
+        Buf { inner: Wtf8Buf::from_box(inner) }
     }
 }
 
@@ -75,5 +122,14 @@ impl Slice {
         let mut buf = Wtf8Buf::with_capacity(self.inner.len());
         buf.push_wtf8(&self.inner);
         Buf { inner: buf }
+    }
+
+    #[inline]
+    pub fn into_box(&self) -> Box<Slice> {
+        unsafe { mem::transmute(self.inner.into_box()) }
+    }
+
+    pub fn empty_box() -> Box<Slice> {
+        unsafe { mem::transmute(Wtf8::empty_box()) }
     }
 }

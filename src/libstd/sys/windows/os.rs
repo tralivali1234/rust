@@ -12,15 +12,12 @@
 
 #![allow(bad_style)]
 
-use prelude::v1::*;
 use os::windows::prelude::*;
 
 use error::Error as StdError;
 use ffi::{OsString, OsStr};
 use fmt;
 use io;
-use libc::{c_int, c_void};
-use ops::Range;
 use os::windows::ffi::EncodeWide;
 use path::{self, PathBuf};
 use ptr;
@@ -239,7 +236,7 @@ pub fn chdir(p: &path::Path) -> io::Result<()> {
 }
 
 pub fn getenv(k: &OsStr) -> io::Result<Option<OsString>> {
-    let k = try!(to_u16s(k));
+    let k = to_u16s(k)?;
     let res = super::fill_utf16_buf(|buf, sz| unsafe {
         c::GetEnvironmentVariableW(k.as_ptr(), buf, sz)
     }, |buf| {
@@ -258,8 +255,8 @@ pub fn getenv(k: &OsStr) -> io::Result<Option<OsString>> {
 }
 
 pub fn setenv(k: &OsStr, v: &OsStr) -> io::Result<()> {
-    let k = try!(to_u16s(k));
-    let v = try!(to_u16s(v));
+    let k = to_u16s(k)?;
+    let v = to_u16s(v)?;
 
     cvt(unsafe {
         c::SetEnvironmentVariableW(k.as_ptr(), v.as_ptr())
@@ -267,57 +264,10 @@ pub fn setenv(k: &OsStr, v: &OsStr) -> io::Result<()> {
 }
 
 pub fn unsetenv(n: &OsStr) -> io::Result<()> {
-    let v = try!(to_u16s(n));
+    let v = to_u16s(n)?;
     cvt(unsafe {
         c::SetEnvironmentVariableW(v.as_ptr(), ptr::null())
     }).map(|_| ())
-}
-
-pub struct Args {
-    range: Range<isize>,
-    cur: *mut *mut u16,
-}
-
-impl Iterator for Args {
-    type Item = OsString;
-    fn next(&mut self) -> Option<OsString> {
-        self.range.next().map(|i| unsafe {
-            let ptr = *self.cur.offset(i);
-            let mut len = 0;
-            while *ptr.offset(len) != 0 { len += 1; }
-
-            // Push it onto the list.
-            let ptr = ptr as *const u16;
-            let buf = slice::from_raw_parts(ptr, len as usize);
-            OsStringExt::from_wide(buf)
-        })
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) { self.range.size_hint() }
-}
-
-impl ExactSizeIterator for Args {
-    fn len(&self) -> usize { self.range.len() }
-}
-
-impl Drop for Args {
-    fn drop(&mut self) {
-        // self.cur can be null if CommandLineToArgvW previously failed,
-        // but LocalFree ignores NULL pointers
-        unsafe { c::LocalFree(self.cur as *mut c_void); }
-    }
-}
-
-pub fn args() -> Args {
-    unsafe {
-        let mut nArgs: c_int = 0;
-        let lpCmdLine = c::GetCommandLineW();
-        let szArgList = c::CommandLineToArgvW(lpCmdLine, &mut nArgs);
-
-        // szArcList can be NULL if CommandLinToArgvW failed,
-        // but in that case nArgs is 0 so we won't actually
-        // try to read a null pointer
-        Args { cur: szArgList, range: 0..(nArgs as isize) }
-    }
 }
 
 pub fn temp_dir() -> PathBuf {
@@ -338,9 +288,9 @@ pub fn home_dir() -> Option<PathBuf> {
         let _handle = Handle::new(token);
         super::fill_utf16_buf(|buf, mut sz| {
             match c::GetUserProfileDirectoryW(token, buf, &mut sz) {
-                0 if c::GetLastError() != 0 => 0,
+                0 if c::GetLastError() != c::ERROR_INSUFFICIENT_BUFFER => 0,
                 0 => sz,
-                n => n as c::DWORD,
+                _ => sz - 1, // sz includes the null terminator
             }
         }, super::os2path).ok()
     })

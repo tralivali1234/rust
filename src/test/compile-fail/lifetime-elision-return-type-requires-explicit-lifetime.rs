@@ -11,6 +11,7 @@
 // Lifetime annotation needed because we have no arguments.
 fn f() -> &isize {    //~ ERROR missing lifetime specifier
 //~^ HELP there is no value for it to be borrowed from
+//~| HELP consider giving it a 'static lifetime
     panic!()
 }
 
@@ -33,6 +34,31 @@ fn h(_x: &Foo) -> &isize { //~ ERROR missing lifetime specifier
 
 fn i(_x: isize) -> &isize { //~ ERROR missing lifetime specifier
 //~^ HELP this function's return type contains a borrowed value
+//~| HELP consider giving it an explicit bounded or 'static lifetime
+    panic!()
+}
+
+// Cases which used to work but now don't.
+
+type StaticStr = &'static str; // hides 'static
+trait WithLifetime<'a> {
+    type Output; // can hide 'a
+}
+
+// This worked because the type of the first argument contains
+// 'static, although StaticStr doesn't even have parameters.
+fn j(_x: StaticStr) -> &isize { //~ ERROR missing lifetime specifier
+//~^ HELP this function's return type contains a borrowed value
+//~| HELP consider giving it an explicit bounded or 'static lifetime
+    panic!()
+}
+
+// This worked because the compiler resolved the argument type
+// to <T as WithLifetime<'a>>::Output which has the hidden 'a.
+fn k<'a, T: WithLifetime<'a>>(_x: T::Output) -> &isize {
+//~^ ERROR missing lifetime specifier
+//~| HELP this function's return type contains a borrowed value
+//~| HELP consider giving it an explicit bounded or 'static lifetime
     panic!()
 }
 

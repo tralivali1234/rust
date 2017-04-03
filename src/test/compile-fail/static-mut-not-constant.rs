@@ -8,10 +8,12 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+// gate-test-drop_types_in_const
+
 #![feature(box_syntax)]
 
 static mut a: Box<isize> = box 3;
 //~^ ERROR allocations are not allowed in statics
-//~^^ ERROR mutable statics are not allowed to have boxes
+//~^^ ERROR destructors in statics are an unstable feature
 
 fn main() {}

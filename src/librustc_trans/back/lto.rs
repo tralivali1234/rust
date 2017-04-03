@@ -8,50 +8,94 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use super::link;
-use super::write;
+use back::link;
+use back::write;
+use back::symbol_export::{self, ExportedSymbols};
 use rustc::session::{self, config};
 use llvm;
 use llvm::archive_ro::ArchiveRO;
 use llvm::{ModuleRef, TargetMachineRef, True, False};
 use rustc::util::common::time;
 use rustc::util::common::path2cstr;
+use rustc::hir::def_id::LOCAL_CRATE;
 use back::write::{ModuleConfig, with_llvm_pmb};
 
 use libc;
 use flate;
 
 use std::ffi::CString;
+use std::path::Path;
 
-pub fn run(sess: &session::Session, llmod: ModuleRef,
-           tm: TargetMachineRef, reachable: &[String],
+pub fn crate_type_allows_lto(crate_type: config::CrateType) -> bool {
+    match crate_type {
+        config::CrateTypeExecutable |
+        config::CrateTypeStaticlib  |
+        config::CrateTypeCdylib     => true,
+
+        config::CrateTypeDylib     |
+        config::CrateTypeRlib      |
+        config::CrateTypeProcMacro => false,
+    }
+}
+
+pub fn run(sess: &session::Session,
+           llmod: ModuleRef,
+           tm: TargetMachineRef,
+           exported_symbols: &ExportedSymbols,
            config: &ModuleConfig,
-           name_extra: &str,
-           output_names: &config::OutputFilenames) {
+           temp_no_opt_bc_filename: &Path) {
     if sess.opts.cg.prefer_dynamic {
-        sess.err("cannot prefer dynamic linking when performing LTO");
-        sess.note("only 'staticlib' and 'bin' outputs are supported with LTO");
+        sess.struct_err("cannot prefer dynamic linking when performing LTO")
+            .note("only 'staticlib', 'bin', and 'cdylib' outputs are \
+                   supported with LTO")
+            .emit();
         sess.abort_if_errors();
     }
 
     // Make sure we actually can run LTO
     for crate_type in sess.crate_types.borrow().iter() {
-        match *crate_type {
-            config::CrateTypeExecutable | config::CrateTypeStaticlib => {}
-            _ => {
-                sess.fatal("lto can only be run for executables and \
+        if !crate_type_allows_lto(*crate_type) {
+            sess.fatal("lto can only be run for executables, cdylibs and \
                             static library outputs");
-            }
         }
     }
+
+    let export_threshold =
+        symbol_export::crates_export_threshold(&sess.crate_types.borrow());
+
+    let symbol_filter = &|&(ref name, level): &(String, _)| {
+        if symbol_export::is_below_threshold(level, export_threshold) {
+            let mut bytes = Vec::with_capacity(name.len() + 1);
+            bytes.extend(name.bytes());
+            Some(CString::new(bytes).unwrap())
+        } else {
+            None
+        }
+    };
+
+    let mut symbol_white_list: Vec<CString> = exported_symbols
+        .exported_symbols(LOCAL_CRATE)
+        .iter()
+        .filter_map(symbol_filter)
+        .collect();
 
     // For each of our upstream dependencies, find the corresponding rlib and
     // load the bitcode from the archive. Then merge it into the current LLVM
     // module that we've got.
-    link::each_linked_rlib(sess, &mut |_, path| {
+    link::each_linked_rlib(sess, &mut |cnum, path| {
+        // `#![no_builtins]` crates don't participate in LTO.
+        if sess.cstore.is_no_builtins(cnum) {
+            return;
+        }
+
+        symbol_white_list.extend(
+            exported_symbols.exported_symbols(cnum)
+                            .iter()
+                            .filter_map(symbol_filter));
+
         let archive = ArchiveRO::open(&path).expect("wanted an rlib");
         let bytecodes = archive.iter().filter_map(|child| {
-            child.name().map(|name| (name, child))
+            child.ok().and_then(|c| c.name().map(|name| (name, c)))
         }).filter(|&(name, _)| name.ends_with("bytecode.deflate"));
         for (name, data) in bytecodes {
             let bc_encoded = data.data();
@@ -103,17 +147,16 @@ pub fn run(sess: &session::Session, llmod: ModuleRef,
                                                         bc_decoded.len() as libc::size_t) {
                     write::llvm_err(sess.diagnostic(),
                                     format!("failed to load bc of `{}`",
-                                            &name[..]));
+                                            name));
                 }
             });
         }
     });
 
-    // Internalize everything but the reachable symbols of the current module
-    let cstrs: Vec<CString> = reachable.iter().map(|s| {
-        CString::new(s.clone()).unwrap()
-    }).collect();
-    let arr: Vec<*const libc::c_char> = cstrs.iter().map(|c| c.as_ptr()).collect();
+    // Internalize everything but the exported symbols of the current module
+    let arr: Vec<*const libc::c_char> = symbol_white_list.iter()
+                                                         .map(|c| c.as_ptr())
+                                                         .collect();
     let ptr = arr.as_ptr();
     unsafe {
         llvm::LLVMRustRunRestrictionPass(llmod,
@@ -128,8 +171,7 @@ pub fn run(sess: &session::Session, llmod: ModuleRef,
     }
 
     if sess.opts.cg.save_temps {
-        let path = output_names.with_extension(&format!("{}.no-opt.lto.bc", name_extra));
-        let cstr = path2cstr(&path);
+        let cstr = path2cstr(temp_no_opt_bc_filename);
         unsafe {
             llvm::LLVMWriteBitcodeToFile(llmod, cstr.as_ptr());
         }
@@ -144,7 +186,9 @@ pub fn run(sess: &session::Session, llmod: ModuleRef,
     unsafe {
         let pm = llvm::LLVMCreatePassManager();
         llvm::LLVMRustAddAnalysisPasses(tm, pm, llmod);
-        llvm::LLVMRustAddPass(pm, "verify\0".as_ptr() as *const _);
+        let pass = llvm::LLVMRustFindAndCreatePass("verify\0".as_ptr() as *const _);
+        assert!(!pass.is_null());
+        llvm::LLVMRustAddPass(pm, pass);
 
         with_llvm_pmb(llmod, config, &mut |b| {
             llvm::LLVMPassManagerBuilderPopulateLTOPassManager(b, pm,
@@ -152,7 +196,9 @@ pub fn run(sess: &session::Session, llmod: ModuleRef,
                 /* RunInliner = */ True);
         });
 
-        llvm::LLVMRustAddPass(pm, "verify\0".as_ptr() as *const _);
+        let pass = llvm::LLVMRustFindAndCreatePass("verify\0".as_ptr() as *const _);
+        assert!(!pass.is_null());
+        llvm::LLVMRustAddPass(pm, pass);
 
         time(sess.time_passes(), "LTO passes", ||
              llvm::LLVMRunPassManager(pm, llmod));

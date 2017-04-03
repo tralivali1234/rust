@@ -9,16 +9,15 @@
 // except according to those terms.
 
 #![allow(dead_code)]
-#![feature(recover)]
 
-use std::panic::RecoverSafe;
+use std::panic::{UnwindSafe, AssertUnwindSafe};
 use std::cell::RefCell;
 use std::sync::{Mutex, RwLock, Arc};
 use std::rc::Rc;
 
 struct Foo { a: i32 }
 
-fn assert<T: RecoverSafe + ?Sized>() {}
+fn assert<T: UnwindSafe + ?Sized>() {}
 
 fn main() {
     assert::<i32>();
@@ -36,16 +35,26 @@ fn main() {
     assert::<Box<i32>>();
     assert::<Mutex<i32>>();
     assert::<RwLock<i32>>();
+    assert::<&Mutex<i32>>();
+    assert::<&RwLock<i32>>();
     assert::<Rc<i32>>();
     assert::<Arc<i32>>();
+    assert::<Box<[u8]>>();
+
+    trait Trait: UnwindSafe {}
+    assert::<Box<Trait>>();
 
     fn bar<T>() {
         assert::<Mutex<T>>();
         assert::<RwLock<T>>();
     }
-    fn baz<T: RecoverSafe>() {
+    fn baz<T: UnwindSafe>() {
         assert::<Box<T>>();
         assert::<Vec<T>>();
         assert::<RefCell<T>>();
+        assert::<AssertUnwindSafe<T>>();
+        assert::<&AssertUnwindSafe<T>>();
+        assert::<Rc<AssertUnwindSafe<T>>>();
+        assert::<Arc<AssertUnwindSafe<T>>>();
     }
 }

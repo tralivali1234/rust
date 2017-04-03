@@ -14,13 +14,10 @@
 #![feature(asm)]
 #![feature(trace_macros, concat_idents)]
 
-#[derive(Default, //~ ERROR
-           Zero)] //~ ERROR
-enum CantDeriveThose {}
+#[derive(Default)] //~ ERROR
+enum OrDeriveThis {}
 
 fn main() {
-    doesnt_exist!(); //~ ERROR
-
     asm!(invalid); //~ ERROR
 
     concat_idents!("not", "idents"); //~ ERROR
@@ -32,7 +29,6 @@ fn main() {
 
     foo::blah!(); //~ ERROR
 
-    format!(); //~ ERROR
     format!(invalid); //~ ERROR
 
     include!(invalid); //~ ERROR

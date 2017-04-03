@@ -8,98 +8,90 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-use middle::subst;
-use middle::ty::{self, Ty};
-
-use std::collections::HashSet;
+use rustc::ty::{self, Ty};
+use rustc::ty::fold::{TypeFoldable, TypeVisitor};
+use rustc::util::nodemap::FxHashSet;
 
 #[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub enum Parameter {
-    Type(ty::ParamTy),
-    Region(ty::EarlyBoundRegion),
+pub struct Parameter(pub u32);
+
+impl From<ty::ParamTy> for Parameter {
+    fn from(param: ty::ParamTy) -> Self { Parameter(param.idx) }
+}
+
+impl From<ty::EarlyBoundRegion> for Parameter {
+    fn from(param: ty::EarlyBoundRegion) -> Self { Parameter(param.index) }
+}
+
+/// Return the set of parameters constrained by the impl header.
+pub fn parameters_for_impl<'tcx>(impl_self_ty: Ty<'tcx>,
+                                 impl_trait_ref: Option<ty::TraitRef<'tcx>>)
+                                 -> FxHashSet<Parameter>
+{
+    let vec = match impl_trait_ref {
+        Some(tr) => parameters_for(&tr, false),
+        None => parameters_for(&impl_self_ty, false),
+    };
+    vec.into_iter().collect()
 }
 
 /// If `include_projections` is false, returns the list of parameters that are
-/// constrained by the type `ty` - i.e. the value of each parameter in the list is
-/// uniquely determined by `ty` (see RFC 447). If it is true, return the list
+/// constrained by `t` - i.e. the value of each parameter in the list is
+/// uniquely determined by `t` (see RFC 447). If it is true, return the list
 /// of parameters whose values are needed in order to constrain `ty` - these
 /// differ, with the latter being a superset, in the presence of projections.
-pub fn parameters_for_type<'tcx>(ty: Ty<'tcx>,
-                                 include_projections: bool) -> Vec<Parameter> {
-    let mut result = vec![];
-    ty.maybe_walk(|t| match t.sty {
-        ty::TyProjection(..) if !include_projections => {
+pub fn parameters_for<'tcx, T>(t: &T,
+                               include_nonconstraining: bool)
+                               -> Vec<Parameter>
+    where T: TypeFoldable<'tcx>
+{
 
-            false // projections are not injective.
-        }
-        _ => {
-            result.append(&mut parameters_for_type_shallow(t));
-            // non-projection type constructors are injective.
-            true
-        }
-    });
-    result
+    let mut collector = ParameterCollector {
+        parameters: vec![],
+        include_nonconstraining: include_nonconstraining
+    };
+    t.visit_with(&mut collector);
+    collector.parameters
 }
 
-pub fn parameters_for_trait_ref<'tcx>(trait_ref: &ty::TraitRef<'tcx>,
-                                      include_projections: bool) -> Vec<Parameter> {
-    let mut region_parameters =
-        parameters_for_regions_in_substs(&trait_ref.substs);
-
-    let type_parameters =
-        trait_ref.substs
-                 .types
-                 .iter()
-                 .flat_map(|ty| parameters_for_type(ty, include_projections));
-
-    region_parameters.extend(type_parameters);
-
-    region_parameters
+struct ParameterCollector {
+    parameters: Vec<Parameter>,
+    include_nonconstraining: bool
 }
 
-fn parameters_for_type_shallow<'tcx>(ty: Ty<'tcx>) -> Vec<Parameter> {
-    match ty.sty {
-        ty::TyParam(ref d) =>
-            vec![Parameter::Type(d.clone())],
-        ty::TyRef(region, _) =>
-            parameters_for_region(region).into_iter().collect(),
-        ty::TyStruct(_, substs) |
-        ty::TyEnum(_, substs) =>
-            parameters_for_regions_in_substs(substs),
-        ty::TyTrait(ref data) =>
-            parameters_for_regions_in_substs(&data.principal.skip_binder().substs),
-        ty::TyProjection(ref pi) =>
-            parameters_for_regions_in_substs(&pi.trait_ref.substs),
-        ty::TyBool | ty::TyChar | ty::TyInt(..) | ty::TyUint(..) |
-        ty::TyFloat(..) | ty::TyBox(..) | ty::TyStr |
-        ty::TyArray(..) | ty::TySlice(..) | ty::TyBareFn(..) |
-        ty::TyTuple(..) | ty::TyRawPtr(..) |
-        ty::TyInfer(..) | ty::TyClosure(..) | ty::TyError =>
-            vec![]
+impl<'tcx> TypeVisitor<'tcx> for ParameterCollector {
+    fn visit_ty(&mut self, t: Ty<'tcx>) -> bool {
+        match t.sty {
+            ty::TyProjection(..) | ty::TyAnon(..) if !self.include_nonconstraining => {
+                // projections are not injective
+                return false;
+            }
+            ty::TyParam(data) => {
+                self.parameters.push(Parameter::from(data));
+            }
+            _ => {}
+        }
+
+        t.super_visit_with(self)
+    }
+
+    fn visit_region(&mut self, r: &'tcx ty::Region) -> bool {
+        match *r {
+            ty::ReEarlyBound(data) => {
+                self.parameters.push(Parameter::from(data));
+            }
+            _ => {}
+        }
+        false
     }
 }
 
-fn parameters_for_regions_in_substs(substs: &subst::Substs) -> Vec<Parameter> {
-    substs.regions()
-          .iter()
-          .filter_map(|r| parameters_for_region(r))
-          .collect()
-}
-
-fn parameters_for_region(region: &ty::Region) -> Option<Parameter> {
-    match *region {
-        ty::ReEarlyBound(data) => Some(Parameter::Region(data)),
-        _ => None,
-    }
-}
-
-pub fn identify_constrained_type_params<'tcx>(_tcx: &ty::ctxt<'tcx>,
-                                              predicates: &[ty::Predicate<'tcx>],
+pub fn identify_constrained_type_params<'tcx>(predicates: &[ty::Predicate<'tcx>],
                                               impl_trait_ref: Option<ty::TraitRef<'tcx>>,
-                                              input_parameters: &mut HashSet<Parameter>)
+                                              input_parameters: &mut FxHashSet<Parameter>)
 {
     let mut predicates = predicates.to_owned();
-    setup_constraining_predicates(_tcx, &mut predicates, impl_trait_ref, input_parameters);
+    setup_constraining_predicates(&mut predicates, impl_trait_ref, input_parameters);
 }
 
 
@@ -143,10 +135,9 @@ pub fn identify_constrained_type_params<'tcx>(_tcx: &ty::ctxt<'tcx>,
 /// which is determined by 1, which requires `U`, that is determined
 /// by 0. I should probably pick a less tangled example, but I can't
 /// think of any.
-pub fn setup_constraining_predicates<'tcx>(_tcx: &ty::ctxt<'tcx>,
-                                           predicates: &mut [ty::Predicate<'tcx>],
+pub fn setup_constraining_predicates<'tcx>(predicates: &mut [ty::Predicate<'tcx>],
                                            impl_trait_ref: Option<ty::TraitRef<'tcx>>,
-                                           input_parameters: &mut HashSet<Parameter>)
+                                           input_parameters: &mut FxHashSet<Parameter>)
 {
     // The canonical way of doing the needed topological sort
     // would be a DFS, but getting the graph and its ownership
@@ -167,13 +158,15 @@ pub fn setup_constraining_predicates<'tcx>(_tcx: &ty::ctxt<'tcx>,
     //   * <U as Iterator>::Item = T
     //   * T: Debug
     //   * U: Iterator
+    debug!("setup_constraining_predicates: predicates={:?} \
+            impl_trait_ref={:?} input_parameters={:?}",
+           predicates, impl_trait_ref, input_parameters);
     let mut i = 0;
     let mut changed = true;
     while changed {
         changed = false;
 
         for j in i..predicates.len() {
-
             if let ty::Predicate::Projection(ref poly_projection) = predicates[j] {
                 // Note that we can skip binder here because the impl
                 // trait ref never contains any late-bound regions.
@@ -193,12 +186,12 @@ pub fn setup_constraining_predicates<'tcx>(_tcx: &ty::ctxt<'tcx>,
                 // Then the projection only applies if `T` is known, but it still
                 // does not determine `U`.
 
-                let inputs = parameters_for_trait_ref(&projection.projection_ty.trait_ref, true);
+                let inputs = parameters_for(&projection.projection_ty.trait_ref, true);
                 let relies_only_on_inputs = inputs.iter().all(|p| input_parameters.contains(&p));
                 if !relies_only_on_inputs {
                     continue;
                 }
-                input_parameters.extend(parameters_for_type(projection.ty, false));
+                input_parameters.extend(parameters_for(&projection.ty, false));
             } else {
                 continue;
             }
@@ -207,5 +200,8 @@ pub fn setup_constraining_predicates<'tcx>(_tcx: &ty::ctxt<'tcx>,
             i += 1;
             changed = true;
         }
+        debug!("setup_constraining_predicates: predicates={:?} \
+                i={} impl_trait_ref={:?} input_parameters={:?}",
+           predicates, i, impl_trait_ref, input_parameters);
     }
 }

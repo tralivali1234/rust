@@ -8,19 +8,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-const A: usize = { 1; 2 };
-//~^ ERROR: blocks in constants are limited to items and tail expressions
-
-const B: usize = { { } 2 };
-//~^ ERROR: blocks in constants are limited to items and tail expressions
-
-macro_rules! foo {
-    () => (()) //~ ERROR: blocks in constants are limited to items and tail expressions
+enum Foo {
+    Bar = { let x = 1; 3 }
+    //~^ ERROR: blocks in constants are limited to items and tail expressions
+    //~^^ ERROR: blocks in constants are limited to items and tail expressions
 }
-const C: usize = { foo!(); 2 };
 
-const D: usize = { let x = 4; 2 };
+type Array = [u32; {  let x = 2; 5 }];
 //~^ ERROR: blocks in constants are limited to items and tail expressions
+//~^^ ERROR: blocks in constants are limited to items and tail expressions
 
-pub fn main() {
-}
+pub fn main() {}

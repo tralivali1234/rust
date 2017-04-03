@@ -1,72 +1,49 @@
 % Rust Documentation
 
-Welcome to the Rust documentation! You can use the section headings above
-to jump to any particular section.
+<style>
+nav {
+    display: none;
+}
+</style>
 
-# Getting Started
+This page is an overview of the documentation included with your Rust install.
+Other unofficial documentation may exist elsewhere; for example, the [Rust
+Learning] project collects documentation from the community, and [Docs.rs]
+builds documentation for individual Rust packages.
 
-If you haven't seen Rust at all yet, the first thing you should read is the
-introduction to [The Rust Programming Language](book/index.html). It'll give
-you a good idea of what Rust is like.
+# API Documentation
 
-The book provides a lengthy explanation of Rust, its syntax, and its
-concepts. Upon completing the book, you'll be an intermediate Rust
-developer, and will have a good grasp of the fundamental ideas behind
-Rust.
+Rust provides a standard library with a number of features; [we host its
+documentation here][api].
 
-[Rust By Example][rbe] teaches you Rust through a series of small
-examples.
+# Extended Error Documentation
 
-[rbe]: http://rustbyexample.com/
+Many of Rust's errors come with error codes, and you can request extended
+diagnostics from the compiler on those errors. We also [have the text of those
+extended errors on the web][err], if you prefer to read them that way.
 
-# Language Reference
+# The Rust Bookshelf
 
-Rust does not have an exact specification yet, but an effort to describe as much of
-the language in as much detail as possible is in [the reference](reference.html).
+Rust provides a number of book-length sets of documentation, collectively
+nicknamed 'The Rust Bookshelf.'
 
-# Standard Library Reference
+* [The Rust Programming Language][book] teaches you how to program in Rust.
+* [The Unstable Book][unstable-book] has documentation for unstable features.
+* [The Rustonomicon][nomicon] is your guidebook to the dark arts of unsafe Rust.
+* [The Reference][ref] is not a formal spec, but is more detailed and comprehensive than the book.
 
-We have [API documentation for the entire standard
-library](std/index.html). There's a list of crates on the left with more
-specific sections, or you can use the search bar at the top to search for
-something if you know its name.
+Another few words about the reference: it is guaranteed to be accurate, but not
+complete. We now have a policy that all new features must be included in the
+reference before stabilization; however, we are still back-filling things that
+landed before then. That work is being tracked [here][38643].
 
-# The Rustonomicon
+[Rust Learning]: https://github.com/ctjhoa/rust-learning
+[Docs.rs]: https://docs.rs/
+[api]: std/index.html
+[ref]: reference/index.html
+[38643]: https://github.com/rust-lang/rust/issues/38643
+[err]: error-index.html
+[book]: book/index.html
+[nomicon]: nomicon/index.html
+[unstable-book]: unstable-book/index.html
 
-[The Rustonomicon] is an entire book dedicated to explaining
-how to write `unsafe` Rust code. It is for advanced Rust programmers.
-
-[The Rustonomicon]: nomicon/index.html
-
-# Tools
-
-[Cargo](http://doc.crates.io/index.html) is the Rust package manager providing access to libraries
-beyond the standard one, and its website contains lots of good documentation.
-
-[`rustdoc`](book/documentation.html) is the Rust's documentation generator, a tool converting
-annotated source code into HTML docs.
-
-# FAQs
-
-There are questions that are asked quite often, so we've made FAQs for them:
-
-* [Language Design FAQ](complement-design-faq.html)
-* [Language FAQ](complement-lang-faq.html)
-* [Project FAQ](complement-project-faq.html)
-* [How to submit a bug report](https://github.com/rust-lang/rust/blob/master/CONTRIBUTING.md#bug-reports)
-
-# The Error Index
-
-If you encounter an error while compiling your code you may be able to look it
-up in the [Rust Compiler Error Index](error-index.html).
-
-# Community Translations
-
-Several projects have been started to translate the documentation into other
-languages:
-
-- [Russian](https://github.com/kgv/rust_book_ru)
-- [Korean](https://github.com/rust-kr/doc.rust-kr.org)
-- [Chinese](https://github.com/KaiserY/rust-book-chinese)
-- [Spanish](https://goyox86.github.io/elpr)
-- [German](https://panicbit.github.io/rustbook-de)

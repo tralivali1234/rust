@@ -10,7 +10,8 @@
 
 //! The ChaCha random number generator.
 
-use {Rng, SeedableRng, Rand};
+use core::fmt;
+use {Rand, Rng, SeedableRng};
 
 const KEY_WORDS: usize = 8; // 8 words for the 256-bit key
 const STATE_WORDS: usize = 16;
@@ -30,6 +31,16 @@ pub struct ChaChaRng {
     buffer: [u32; STATE_WORDS], // Internal buffer of output
     state: [u32; STATE_WORDS], // Initial state
     index: usize, // Index into state
+}
+
+impl fmt::Debug for ChaChaRng {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("ChaChaRng")
+         .field("buffer", &self.buffer.iter())
+         .field("state", &self.state.iter())
+         .field("index", &self.index)
+         .finish()
+    }
 }
 
 static EMPTY: ChaChaRng = ChaChaRng {
@@ -216,8 +227,9 @@ mod tests {
         let s = ::test::rng().gen_iter::<u32>().take(8).collect::<Vec<u32>>();
         let mut ra: ChaChaRng = SeedableRng::from_seed(&*s);
         let mut rb: ChaChaRng = SeedableRng::from_seed(&*s);
-        assert!(ra.gen_ascii_chars().take(100)
-                  .eq(rb.gen_ascii_chars().take(100)));
+        assert!(ra.gen_ascii_chars()
+            .take(100)
+            .eq(rb.gen_ascii_chars().take(100)));
     }
 
     #[test]
@@ -225,8 +237,9 @@ mod tests {
         let seed: &[_] = &[0, 1, 2, 3, 4, 5, 6, 7];
         let mut ra: ChaChaRng = SeedableRng::from_seed(seed);
         let mut rb: ChaChaRng = SeedableRng::from_seed(seed);
-        assert!(ra.gen_ascii_chars().take(100)
-                  .eq(rb.gen_ascii_chars().take(100)));
+        assert!(ra.gen_ascii_chars()
+            .take(100)
+            .eq(rb.gen_ascii_chars().take(100)));
     }
 
     #[test]
@@ -251,17 +264,17 @@ mod tests {
 
         let v = (0..16).map(|_| ra.next_u32()).collect::<Vec<_>>();
         assert_eq!(v,
-                   vec!(0xade0b876, 0x903df1a0, 0xe56a5d40, 0x28bd8653,
+                   vec![0xade0b876, 0x903df1a0, 0xe56a5d40, 0x28bd8653,
                         0xb819d2bd, 0x1aed8da0, 0xccef36a8, 0xc70d778b,
                         0x7c5941da, 0x8d485751, 0x3fe02477, 0x374ad8b8,
-                        0xf4b8436a, 0x1ca11815, 0x69b687c3, 0x8665eeb2));
+                        0xf4b8436a, 0x1ca11815, 0x69b687c3, 0x8665eeb2]);
 
         let v = (0..16).map(|_| ra.next_u32()).collect::<Vec<_>>();
         assert_eq!(v,
-                   vec!(0xbee7079f, 0x7a385155, 0x7c97ba98, 0x0d082d73,
+                   vec![0xbee7079f, 0x7a385155, 0x7c97ba98, 0x0d082d73,
                         0xa0290fcb, 0x6965e348, 0x3e53c612, 0xed7aee32,
                         0x7621b729, 0x434ee69c, 0xb03371d5, 0xd539d874,
-                        0x281fed31, 0x45fb0a51, 0x1f0ae1ac, 0x6f4d794b));
+                        0x281fed31, 0x45fb0a51, 0x1f0ae1ac, 0x6f4d794b]);
 
 
         let seed: &[_] = &[0, 1, 2, 3, 4, 5, 6, 7];
@@ -278,10 +291,10 @@ mod tests {
         }
 
         assert_eq!(v,
-                   vec!(0xf225c81a, 0x6ab1be57, 0x04d42951, 0x70858036,
+                   vec![0xf225c81a, 0x6ab1be57, 0x04d42951, 0x70858036,
                         0x49884684, 0x64efec72, 0x4be2d186, 0x3615b384,
                         0x11cfa18e, 0xd3c50049, 0x75c775f6, 0x434c6530,
-                        0x2c5bad8f, 0x898881dc, 0x5f1c86d9, 0xc1f8e7f4));
+                        0x2c5bad8f, 0x898881dc, 0x5f1c86d9, 0xc1f8e7f4]);
     }
 
     #[test]

@@ -10,6 +10,7 @@
 
 #![allow(missing_copy_implementations)]
 
+use fmt;
 use io::{self, Read, Write, ErrorKind, BufRead};
 
 /// Copies the entire contents of a reader into a writer.
@@ -36,7 +37,7 @@ use io::{self, Read, Write, ErrorKind, BufRead};
 /// let mut reader: &[u8] = b"hello";
 /// let mut writer: Vec<u8> = vec![];
 ///
-/// try!(io::copy(&mut reader, &mut writer));
+/// io::copy(&mut reader, &mut writer)?;
 ///
 /// assert_eq!(reader, &writer[..]);
 /// # Ok(())
@@ -55,14 +56,14 @@ pub fn copy<R: ?Sized, W: ?Sized>(reader: &mut R, writer: &mut W) -> io::Result<
             Err(ref e) if e.kind() == ErrorKind::Interrupted => continue,
             Err(e) => return Err(e),
         };
-        try!(writer.write_all(&buf[..len]));
+        writer.write_all(&buf[..len])?;
         written += len as u64;
     }
 }
 
 /// A reader which is always at EOF.
 ///
-/// This struct is generally created by calling [`empty()`][empty]. Please see
+/// This struct is generally created by calling [`empty`][empty]. Please see
 /// the documentation of `empty()` for more details.
 ///
 /// [empty]: fn.empty.html
@@ -78,14 +79,11 @@ pub struct Empty { _priv: () }
 /// A slightly sad example of not reading anything into a buffer:
 ///
 /// ```
-/// use std::io;
-/// use std::io::Read;
+/// use std::io::{self, Read};
 ///
-/// # fn foo() -> io::Result<String> {
 /// let mut buffer = String::new();
-/// try!(io::empty().read_to_string(&mut buffer));
-/// # Ok(buffer)
-/// # }
+/// io::empty().read_to_string(&mut buffer).unwrap();
+/// assert!(buffer.is_empty());
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn empty() -> Empty { Empty { _priv: () } }
@@ -100,9 +98,16 @@ impl BufRead for Empty {
     fn consume(&mut self, _n: usize) {}
 }
 
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl fmt::Debug for Empty {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("Empty { .. }")
+    }
+}
+
 /// A reader which yields one byte over and over and over and over and over and...
 ///
-/// This struct is generally created by calling [`repeat()`][repeat]. Please
+/// This struct is generally created by calling [`repeat`][repeat]. Please
 /// see the documentation of `repeat()` for more details.
 ///
 /// [repeat]: fn.repeat.html
@@ -113,6 +118,16 @@ pub struct Repeat { byte: u8 }
 ///
 /// All reads from this reader will succeed by filling the specified buffer with
 /// the given byte.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::{self, Read};
+///
+/// let mut buffer = [0; 3];
+/// io::repeat(0b101).read_exact(&mut buffer).unwrap();
+/// assert_eq!(buffer, [0b101, 0b101, 0b101]);
+/// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn repeat(byte: u8) -> Repeat { Repeat { byte: byte } }
 
@@ -126,9 +141,16 @@ impl Read for Repeat {
     }
 }
 
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl fmt::Debug for Repeat {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("Repeat { .. }")
+    }
+}
+
 /// A writer which will move data into the void.
 ///
-/// This struct is generally created by calling [`sink()`][sink]. Please
+/// This struct is generally created by calling [`sink`][sink]. Please
 /// see the documentation of `sink()` for more details.
 ///
 /// [sink]: fn.sink.html
@@ -139,6 +161,16 @@ pub struct Sink { _priv: () }
 ///
 /// All calls to `write` on the returned instance will return `Ok(buf.len())`
 /// and the contents of the buffer will not be inspected.
+///
+/// # Examples
+///
+/// ```rust
+/// use std::io::{self, Write};
+///
+/// let buffer = vec![1, 2, 3, 5, 8];
+/// let num_bytes = io::sink().write(&buffer).unwrap();
+/// assert_eq!(num_bytes, 5);
+/// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn sink() -> Sink { Sink { _priv: () } }
 
@@ -148,10 +180,15 @@ impl Write for Sink {
     fn flush(&mut self) -> io::Result<()> { Ok(()) }
 }
 
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl fmt::Debug for Sink {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("Sink { .. }")
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use prelude::v1::*;
-
     use io::prelude::*;
     use io::{copy, sink, empty, repeat};
 
@@ -196,30 +233,5 @@ mod tests {
         assert_eq!(repeat(4).take(100).bytes().count(), 100);
         assert_eq!(repeat(4).take(100).bytes().next().unwrap().unwrap(), 4);
         assert_eq!(repeat(1).take(10).chain(repeat(2).take(10)).bytes().count(), 20);
-    }
-
-    #[test]
-    fn tee() {
-        let mut buf = [0; 10];
-        {
-            let mut ptr: &mut [u8] = &mut buf;
-            assert_eq!(repeat(4).tee(&mut ptr).take(5).read(&mut [0; 10]).unwrap(), 5);
-        }
-        assert_eq!(buf, [4, 4, 4, 4, 4, 0, 0, 0, 0, 0]);
-    }
-
-    #[test]
-    fn broadcast() {
-        let mut buf1 = [0; 10];
-        let mut buf2 = [0; 10];
-        {
-            let mut ptr1: &mut [u8] = &mut buf1;
-            let mut ptr2: &mut [u8] = &mut buf2;
-
-            assert_eq!((&mut ptr1).broadcast(&mut ptr2)
-                                  .write(&[1, 2, 3]).unwrap(), 3);
-        }
-        assert_eq!(buf1, buf2);
-        assert_eq!(buf1, [1, 2, 3, 0, 0, 0, 0, 0, 0, 0]);
     }
 }

@@ -11,9 +11,12 @@
 use foo::bar::{
     self,
 //~^ ERROR `self` import can only appear once in the list
+//~^^ NOTE previous import of `bar` here
     Bar,
     self
 //~^ NOTE another `self` import appears here
+//~| ERROR a module named `bar` has already been imported in this module
+//~| NOTE already imported
 };
 
 use {self};

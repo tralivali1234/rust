@@ -11,5 +11,7 @@
 
 fn main() {
     let _foo = Vec::new();
-    //~^ ERROR type annotations or generic parameter binding required
+    //~^ ERROR type annotations needed [E0282]
+    //~| NOTE cannot infer type for `T`
+    //~| NOTE consider giving `_foo` a type
 }

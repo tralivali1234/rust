@@ -1,14 +1,18 @@
-Reference grammar.
+# Reference grammar.
 
 Uses [antlr4](http://www.antlr.org/) and a custom Rust tool to compare
-ASTs/token streams generated. You can use the `check-lexer` make target to
+ASTs/token streams generated. You can use the `make check-lexer` target to
 run all of the available tests.
 
-To use manually:
+The build of the rust part is included with `make tidy` and can be run with `make check-build-lexer-verifier`.
+
+# Manual build
+
+To use manually, assuming antlr4 is installed at `/usr/share/java/antlr-complete.jar`:
 
 ```
 antlr4 RustLexer.g4
-javac *.java
+javac -classpath /usr/share/java/antlr-complete.jar *.java
 rustc -O verify.rs
 for file in ../*/**.rs; do
     echo $file;
@@ -16,5 +20,14 @@ for file in ../*/**.rs; do
 done
 ```
 
-Note That the `../*/**.rs` glob will match every `*.rs` file in the above
-directory and all of its recursive children. This is a zsh extension.
+Note that the `../*/**.rs` glob will match every `*.rs` file in the above
+directory and all of its recursive children. This is a Zsh extension.
+
+
+## Cleanup
+
+To cleanup you can use a command like this:
+
+```bash
+rm -f verify *.class *.java *.tokens
+```

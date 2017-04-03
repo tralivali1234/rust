@@ -1,4 +1,4 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
+// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
 //
@@ -8,17 +8,20 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// compile-flags: -Z parse-only
+// compile-flags: -Z parse-only -Z continue-parse-after-error
 
+// Empty predicate list is OK
 fn equal1<T>(_: &T, _: &T) -> bool where {
-//~^ ERROR a `where` clause must have at least one predicate in it
     true
 }
 
+// Empty bound list is OK
 fn equal2<T>(_: &T, _: &T) -> bool where T: {
-//~^ ERROR each predicate in a `where` clause must have at least one bound
     true
 }
+
+fn foo<'a>() where 'a {}
+//~^ ERROR expected `:`, found `{`
 
 fn main() {
 }

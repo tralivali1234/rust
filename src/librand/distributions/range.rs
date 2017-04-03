@@ -12,9 +12,10 @@
 
 // this is surprisingly complicated to be both generic & correct
 
+use core::fmt;
 use core::marker::Sized;
 use Rng;
-use distributions::{Sample, IndependentSample};
+use distributions::{IndependentSample, Sample};
 
 /// Sample values uniformly between two bounds.
 ///
@@ -50,9 +51,20 @@ impl<Sup: SampleRange> Sample<Sup> for Range<Sup> {
         self.ind_sample(rng)
     }
 }
+
 impl<Sup: SampleRange> IndependentSample<Sup> for Range<Sup> {
     fn ind_sample<R: Rng>(&self, rng: &mut R) -> Sup {
         SampleRange::sample_range(self, rng)
+    }
+}
+
+impl<X: fmt::Debug> fmt::Debug for Range<X> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Range")
+         .field("low", &self.low)
+         .field("range", &self.range)
+         .field("accept_zone", &self.accept_zone)
+         .finish()
     }
 }
 
@@ -148,7 +160,7 @@ float_impl! { f64 }
 
 #[cfg(test)]
 mod tests {
-    use distributions::{Sample, IndependentSample};
+    use distributions::{IndependentSample, Sample};
     use super::Range;
 
     #[should_panic]

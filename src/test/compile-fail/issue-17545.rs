@@ -8,7 +8,7 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#![feature(unboxed_closures)]
+#![feature(fn_traits)]
 
 pub fn foo<'a, F: Fn(&'a ())>(bar: F) {
     bar.call((

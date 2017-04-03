@@ -11,7 +11,7 @@
 // Checks that the Fn trait hierarchy rules do not permit
 // Fn to be used where FnMut is implemented.
 
-#![feature(unboxed_closures)]
+#![feature(fn_traits, unboxed_closures)]
 #![feature(overloaded_calls)]
 
 use std::ops::{Fn,FnMut,FnOnce};
@@ -36,5 +36,5 @@ fn call_it<F:Fn(isize)->isize>(f: &F, x: isize) -> isize {
 
 fn main() {
     let x = call_it(&S, 22);
-    //~^ ERROR not implemented
+    //~^ ERROR E0277
 }

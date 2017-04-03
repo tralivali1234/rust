@@ -12,13 +12,27 @@
 
 #![stable(feature = "raw_os", since = "1.1.0")]
 
-#[cfg(any(target_os = "android",
+use fmt;
+
+#[cfg(any(target_os = "emscripten",
           all(target_os = "linux", any(target_arch = "aarch64",
-                                       target_arch = "arm"))))]
+                                       target_arch = "arm",
+                                       target_arch = "powerpc",
+                                       target_arch = "powerpc64",
+                                       target_arch = "s390x")),
+          all(target_os = "android", any(target_arch = "aarch64",
+                                         target_arch = "arm")),
+          all(target_os = "fuchsia", target_arch = "aarch64")))]
 #[stable(feature = "raw_os", since = "1.1.0")] pub type c_char = u8;
-#[cfg(not(any(target_os = "android",
+#[cfg(not(any(target_os = "emscripten",
               all(target_os = "linux", any(target_arch = "aarch64",
-                                           target_arch = "arm")))))]
+                                           target_arch = "arm",
+                                           target_arch = "powerpc",
+                                           target_arch = "powerpc64",
+                                           target_arch = "s390x")),
+              all(target_os = "android", any(target_arch = "aarch64",
+                                             target_arch = "arm")),
+              all(target_os = "fuchsia", target_arch = "aarch64"))))]
 #[stable(feature = "raw_os", since = "1.1.0")] pub type c_char = i8;
 #[stable(feature = "raw_os", since = "1.1.0")] pub type c_schar = i8;
 #[stable(feature = "raw_os", since = "1.1.0")] pub type c_uchar = u8;
@@ -61,7 +75,15 @@ pub enum c_void {
     #[doc(hidden)] __variant2,
 }
 
+#[stable(feature = "std_debug", since = "1.16.0")]
+impl fmt::Debug for c_void {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.pad("c_void")
+    }
+}
+
 #[cfg(test)]
+#[allow(unused_imports)]
 mod tests {
     use any::TypeId;
     use libc;
@@ -74,34 +96,10 @@ mod tests {
         )*}
     }
 
-    macro_rules! ok_size {
-        ($($t:ident)*) => {$(
-            assert!(mem::size_of::<libc::$t>() == mem::size_of::<raw::$t>(),
-                    "{} is wrong", stringify!($t));
-        )*}
-    }
-
     #[test]
     fn same() {
         use os::raw;
         ok!(c_char c_schar c_uchar c_short c_ushort c_int c_uint c_long c_ulong
             c_longlong c_ulonglong c_float c_double);
-    }
-
-    #[cfg(unix)]
-    fn unix() {
-        {
-            use os::unix::raw;
-            ok!(uid_t gid_t dev_t ino_t mode_t nlink_t off_t blksize_t blkcnt_t);
-        }
-        {
-            use sys::platform::raw;
-            ok_size!(stat);
-        }
-    }
-
-    #[cfg(windows)]
-    fn windows() {
-        use os::windows::raw;
     }
 }
